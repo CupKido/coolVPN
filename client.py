@@ -12,7 +12,7 @@ from cryptography.fernet import Fernet
 SERVER_ADDRESS = '127.0.0.1'
 SERVER_PORT = 6493
 SERVER_INTERFACE = "TAP-ProtonVPN Windows Adapter V9"
-REAL_INTERFACE = "Intel(R) Ethernet Connection I219-LM"
+REAL_INTERFACE = conf.iface
 # REAL_INTERFACE = "TAP-ProtonVPN Windows Adapter V9"
 REAL_INTERFACE_IP = '169.254.29.157'
 USED_INTERFACE = "Software Loopback Interface 1"
@@ -51,15 +51,22 @@ def ListenToPackets():
     """
     listen to packats that are on the vpn's interface
     """
-    sniff(iface=USED_INTERFACE, prn=ProcessPackets)
+    sniff(iface=REAL_INTERFACE, prn=ProcessPackets, lfilter=lambda x:  IP in x and x[IP].src != SERVER_ADDRESS)
     return
 
 
 def listen_from_server():
-    sniff(iface=SERVER_INTERFACE, prn=get_from_server)
+    sniff(iface=REAL_INTERFACE, prn=get_from_server, lfilter=lambda x:  IP in x and x[IP].src == SERVER_ADDRESS)
 
 
 def get_from_server(pkt):
+    global SYMMETRIC_KEY
+    if pkt.haslayer(Raw):
+        enc_data = pkt[Raw].load
+        fernet = Fernet(SYMMETRIC_KEY)
+        dec_data = fernet.decrypt(enc_data)
+        data = pickle.loads(dec_data)
+        print(data)
     pkt.display()
     print('got packet')
     return
