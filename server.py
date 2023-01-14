@@ -86,14 +86,29 @@ def process_and_forward(pkt, client_ip):
             symmetric_key = Connected_Client[client_ip][1]
             fernet = Fernet(symmetric_key)
             enc_data = pkt.getlayer(Raw).load
-            client_id, data = pickle.loads(fernet.decrypt(enc_data))
-            data.display()
-            print(client_id)
+            client_id, client_packet = pickle.loads(fernet.decrypt(enc_data))
+            pkt.display()
+            client_packet.display()
+            print("client packet")
+            response = sr1(client_packet, iface=REAL_INTERFACE)
+            response.display()
+            print("response to client packet")
+            send_to_client(response, '127.0.0.1')
 
         return
     except InvalidToken:
         return
 
+
+def send_to_client(pkt, client_ip):
+
+    symmetric_key = Connected_Client[client_ip][1]
+    raw_data = pickle.dumps(pkt)
+    fernet = Fernet(symmetric_key)
+    enc_data = fernet.encrypt(raw_data)
+    packet = IP(src='127.0.0.1', dst='127.0.0.1') / TCP(dport=6494, sport=SERVER_PORT) / Raw(enc_data)
+    packet.display()
+    send(packet, iface=CLIENT_INTERFACE)
 
 
 def send_public_key(pkt):

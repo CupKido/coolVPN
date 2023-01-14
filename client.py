@@ -11,6 +11,7 @@ from cryptography.fernet import Fernet
 
 SERVER_ADDRESS = '127.0.0.1'
 SERVER_PORT = 6493
+SERVER_INTERFACE = "TAP-ProtonVPN Windows Adapter V9"
 REAL_INTERFACE = "Intel(R) Ethernet Connection I219-LM"
 # REAL_INTERFACE = "TAP-ProtonVPN Windows Adapter V9"
 REAL_INTERFACE_IP = '169.254.29.157'
@@ -35,7 +36,8 @@ def StartConnection(ServerIP, interface):
         print("Server unavailable")
         return
     TryPacking()
-    ListenToPackets()
+    listen_from_server()
+    # ListenToPackets()
 
 
 def MoveToUsed(interface):
@@ -50,6 +52,16 @@ def ListenToPackets():
     listen to packats that are on the vpn's interface
     """
     sniff(iface=USED_INTERFACE, prn=ProcessPackets)
+    return
+
+
+def listen_from_server():
+    sniff(iface=SERVER_INTERFACE, prn=get_from_server)
+
+
+def get_from_server(pkt):
+    pkt.display()
+    print('got packet')
     return
 
 
@@ -142,7 +154,7 @@ def get_public_key(ServerIP):
                            lfilter=lambda x: TCP in x and x[TCP].dport == 6494 and x[TCP].sport == SERVER_PORT, count=1)
     sniffer.start()
     packet = IP(dst=ServerIP) / TCP(dport=SERVER_PORT, sport=6494) / Raw(b'Get Public Key')
-    packet.display()
+    # packet.display()
     send(packet, iface=REAL_INTERFACE)
     sniffer.join()
     if len(sniffer.results) == 0:
@@ -155,7 +167,7 @@ def get_public_key(ServerIP):
 
 
 def TryPacking():
-    dst_ip = "8.8.8.8"
+    dst_ip = "192.168.1.126"
 
     # Create the ICMP packet
     icmp = ICMP()
@@ -167,7 +179,6 @@ def TryPacking():
     ping = ip / icmp
 
     # Send the packet and receive the response
-    ping.display()
     ProcessPackets(ping)
 
 
@@ -177,7 +188,7 @@ def tryEncode():
     """
     # Create a new packet
     packet = IP(dst="www.google.com") / TCP() / Raw(b'abc')
-    packet.display()
+    # packet.display()
     # Serialize the packet using Scapy's `raw` function
 
     # Deserialize the packet using the `pickle.loads` function
@@ -187,10 +198,10 @@ def tryEncode():
 
     # Create a new TCP packet with the raw data
     new_packet = TCP() / Raw(loaded_packet)
-    new_packet.display()
+    # new_packet.display()
 
     pkt = pickle.loads(new_packet.getlayer(Raw).load)
-    pkt.display()
+    # pkt.display()
     # Verify that the new packet is a TCP packet
     if TCP in new_packet:
         print("The new packet is a TCP packet.")
@@ -216,4 +227,4 @@ def confirm_keys():
 
 
 # Main
-StartConnection(SERVER_ADDRESS, "TAP-ProtonVPN Windows Adapter V9")
+StartConnection(SERVER_ADDRESS, SERVER_INTERFACE)
