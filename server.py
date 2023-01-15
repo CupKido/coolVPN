@@ -108,17 +108,11 @@ def process_and_forward(pkt, client_ip):
     global SERVER_ADDRESS
     try:
         if pkt.haslayer(Raw):
-            symmetric_key = Connected_Client[client_ip][1]
-            fernet = Fernet(symmetric_key)
-            enc_data = pkt.getlayer(Raw).load
-            client_id, client_packet = pickle.loads(fernet.decrypt(enc_data))
+            client_id, client_packet = unpack_from_client(pkt)
             client_packet.display()
             print("client packet")
             if TCP in client_packet:
                 used_ports[client_packet[TCP].sport] = client_ip
-            client_packet[IP].src = SERVER_ADDRESS
-            print("client packet after change")
-            client_packet.display()
             send(client_packet, iface=REAL_INTERFACE)
             #response = sr1(client_packet, iface=REAL_INTERFACE, timeout=3)
             #response.display()
@@ -144,13 +138,26 @@ def pack_to_client(pkt, client_ip):
     '''
     return a packet that is encrypted with the client's symmetric key, and packet
     '''
+    global RESPONSE_PORT
     symmetric_key = Connected_Client[client_ip][1]
     pkt[IP].dst = client_ip
     raw_data = pickle.dumps(pkt)
     fernet = Fernet(symmetric_key)
     enc_data = fernet.encrypt(raw_data)
-    packet = IP(dst=client_ip) / TCP(sport=SERVER_PORT) / Raw(enc_data)
+    packet = IP(dst=client_ip, src=SERVER_ADDRESS) / TCP(sport=RESPONSE_PORT) / Raw(enc_data)
     return packet
+
+def unpack_from_client(pkt): #
+    if IP not in pkt:
+        return
+    client_ip = pkt[IP].src
+    if pkt.haslayer(Raw):
+        symmetric_key = Connected_Client[client_ip][1]
+        fernet = Fernet(symmetric_key)
+        enc_data = pkt.getlayer(Raw).load
+        client_id, client_packet = pickle.loads(fernet.decrypt(enc_data))
+        client_packet[IP].src = SERVER_ADDRESS
+        return client_id, client_packet
 
 
 def send_public_key(pkt):

@@ -16,7 +16,7 @@ RESPONSE_PORT = 6494
 SERVER_INTERFACE = "TAP-ProtonVPN Windows Adapter V9"
 REAL_INTERFACE = conf.iface
 # REAL_INTERFACE = "TAP-ProtonVPN Windows Adapter V9"
-REAL_INTERFACE_IP = '169.254.29.157'
+REAL_INTERFACE_IP = get_if_addr(conf.iface)
 USED_INTERFACE = "Software Loopback Interface 1"
 MY_ID = "saar"
 RSA_KEYS = ()
@@ -61,7 +61,8 @@ def listen_from_adapter(adapter_interface):
 
 
 def listen_from_server():
-    sniff(iface=conf.iface, prn=get_from_server, lfilter=lambda x:  IP in x and x[IP].src == SERVER_ADDRESS)
+    global SERVER_ADDRESS, RESPONSE_PORT
+    sniff(iface=conf.iface, prn=get_from_server, lfilter=lambda x:  IP in x and x[IP].src == SERVER_ADDRESS and TCP in x and x[TCP].dport==RESPONSE_PORT)
 
 
 def get_from_server(pkt):
@@ -82,13 +83,7 @@ def ProcessPackets(pkt):
     encrypts the packet with the symmetric key and sends it to the server
     """
     global SYMMETRIC_KEY
-    data = (MY_ID, pkt)
-    raw_data = pickle.dumps(data)
-    fernet = Fernet(SYMMETRIC_KEY)
-    enc_data = fernet.encrypt(raw_data)
-
-    # creating the packet and sending it
-    packet = IP(src=REAL_INTERFACE_IP, dst=SERVER_ADDRESS) / TCP(dport=SERVER_PORT, sport=6494) / Raw(enc_data)
+    packet = pack_to_server(pkt)
     packet.display()
     send(packet, iface=REAL_INTERFACE)
 
@@ -177,6 +172,21 @@ def get_public_key(ServerIP):
         SERVER_PUBLIC_KEY = pickle.loads(newp.getlayer(Raw).load)
         return SERVER_PUBLIC_KEY
 
+def pack_to_server(pkt): 
+    data = (MY_ID, pkt)
+    raw_data = pickle.dumps(data)
+    fernet = Fernet(SYMMETRIC_KEY)
+    enc_data = fernet.encrypt(raw_data)
+
+    # creating the packet and sending it
+    return IP(src=REAL_INTERFACE_IP, dst=SERVER_ADDRESS) / TCP(dport=REQUEST_PORT, sport=REQUEST_PORT) / Raw(enc_data)
+
+def unpack_from_server(pkt):
+    if pkt.haslayer(Raw):
+        fernet = Fernet(SYMMETRIC_KEY)
+        raw_data = fernet.decrypt(pkt.getlayer(Raw).load)
+        data = pickle.loads(raw_data)
+        return data
 
 def TryPacking():
     dst_ip = "google.com"
@@ -191,7 +201,15 @@ def TryPacking():
     ping = ip / icmp
 
     # Send the packet and receive the response
-    ProcessPackets(ping)
+
+    ip = IP(src="192.168.1.100", dst='google.com')
+    tcp = TCP(sport=12345, dport=443, flags="S", seq=100)
+
+# Combine the layers to create the packet
+    syn_packet = ip/tcp
+
+# Send the packet
+    ProcessPackets(syn_packet)
 
 
 def tryEncode():
