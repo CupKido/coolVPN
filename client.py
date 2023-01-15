@@ -41,8 +41,8 @@ def StartConnection(ServerIP, adapter_interface, real_interface):
         return
     t = threading.Thread(target=listen_from_server, args=())
     t.start()
-    TryPacking()
-    listen_from_adapter(adapter_interface)
+    TryHTTP()
+    #listen_from_adapter(adapter_interface)
 
 
 def MoveToUsed(interface):
@@ -67,13 +67,8 @@ def listen_from_server():
 
 def get_from_server(pkt):
     global SYMMETRIC_KEY
-    if pkt.haslayer(Raw):
-        enc_data = pkt[Raw].load
-        fernet = Fernet(SYMMETRIC_KEY)
-        dec_data = fernet.decrypt(enc_data)
-        data = pickle.loads(dec_data)
-        print(data)
-    pkt.display()
+    packet = unpack_from_server(pkt)
+    packet.display()
     print('got packet')
     return
 
@@ -188,7 +183,7 @@ def unpack_from_server(pkt):
         data = pickle.loads(raw_data)
         return data
 
-def TryPacking():
+def TryHTTP():
     dst_ip = "google.com"
 
     # Create the ICMP packet
@@ -202,14 +197,21 @@ def TryPacking():
 
     # Send the packet and receive the response
 
-    ip = IP(src="192.168.1.100", dst='google.com')
-    tcp = TCP(sport=12345, dport=443, flags="S", seq=100)
+    # Create an IP packet
+    ip = IP(src=get_if_addr(conf.iface), dst="google.com")
 
-# Combine the layers to create the packet
-    syn_packet = ip/tcp
+    # Create a TCP packet
+    tcp = TCP(dport=80, sport=12346)
+    # Create an HTTP request packet
+    http_req = "GET / HTTP/1.1\r\n\r\n"
+
+    # Combine the IP and TCP packets with the HTTP request packet
+    pkt = ip/tcp/http_req
+
+    # Send the packet
 
 # Send the packet
-    ProcessPackets(syn_packet)
+    ProcessPackets(pkt)
 
 
 def tryEncode():

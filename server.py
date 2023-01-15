@@ -62,7 +62,7 @@ def ProcessPackets(pkt):
     if not (pkt.haslayer(IP) and (pkt[IP].dst == '127.0.0.1' or pkt[IP].dst == SERVER_ADDRESS)):
         return
     # check if pkt is a request for the server
-    if TCP in pkt and pkt[TCP].dport == REQUEST_PORT:
+    if TCP in pkt and pkt[TCP].dport == REQUEST_PORT or UDP in pkt and pkt[UDP].dport == REQUEST_PORT:
         print("caught REQUSET package")
         # check if client already exists, and process
         if IP in pkt and pkt[IP].src in Connected_Client.keys():
@@ -83,23 +83,23 @@ def ProcessPackets(pkt):
     else:
         # need to add a filter so that only packets that are meant for the client are processed
         if TCP in pkt and pkt[TCP].dport in used_ports.keys():
-            process_to_client(pkt)
+            process_to_client(pkt, pkt[TCP].dport)
+            return
+        elif UDP in pkt and pkt[UDP].dport in used_ports.keys():
+            process_to_client(pkt, pkt[UDP].dport)
             return
         else:
             return
 
 
-def process_to_client(pkt):
+def process_to_client(pkt, port):
     """
     encrypts the packet and sends it to the client
     """
-    client_ip = used_ports[pkt[TCP].dport]
-    symmetric_key = Connected_Client[client_ip][1]
-    pkt[IP].dst = client_ip
-    raw_data = pickle.dumps(pkt)
-    fernet = Fernet(symmetric_key)
-    enc_data = fernet.encrypt(raw_data)
-    packet = IP(dst=client_ip) / TCP(sport=SERVER_PORT) / Raw(enc_data)
+    client_ip = used_ports[port]
+    packet = pack_to_client(pkt, client_ip)
+    packet.display()
+    send(packet, iface=REAL_INTERFACE)
 
 def process_and_forward(pkt, client_ip):
     """
@@ -113,6 +113,8 @@ def process_and_forward(pkt, client_ip):
             print("client packet")
             if TCP in client_packet:
                 used_ports[client_packet[TCP].sport] = client_ip
+            elif UDP in client_packet:
+                used_ports[client_packet[UDP].sport] = client_ip
             send(client_packet, iface=REAL_INTERFACE)
             #response = sr1(client_packet, iface=REAL_INTERFACE, timeout=3)
             #response.display()
@@ -144,7 +146,7 @@ def pack_to_client(pkt, client_ip):
     raw_data = pickle.dumps(pkt)
     fernet = Fernet(symmetric_key)
     enc_data = fernet.encrypt(raw_data)
-    packet = IP(dst=client_ip, src=SERVER_ADDRESS) / TCP(sport=RESPONSE_PORT) / Raw(enc_data)
+    packet = IP(dst=client_ip) / TCP(sport=RESPONSE_PORT, dport=RESPONSE_PORT) / Raw(enc_data)
     return packet
 
 def unpack_from_client(pkt): #
@@ -166,8 +168,10 @@ def send_public_key(pkt):
     """
     global RSA_KEYS
     raw_data = RSA_KEYS[0]
-    packet = IP(dst=pkt[IP].src) / TCP(dport=pkt[TCP].sport, sport=SERVER_PORT) / get_raw_of(raw_data)
-    send(packet, iface=REAL_INTERFACE)
+    if pkt.haslayer(TCP):
+        packet = IP(dst=pkt[IP].src) / TCP(dport=pkt[TCP].sport, sport=SERVER_PORT) / get_raw_of(raw_data)
+        send(packet, iface=REAL_INTERFACE)
+    
 
 
 def GenerateAndSendID(original_pkt, data):
