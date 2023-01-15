@@ -1,12 +1,9 @@
 import pickle
 import random
 from scapy.layers.inet import *
-from scapy.layers.inet import Ether
 from scapy.layers.dns import *
-from scapy.layers.dns import DNSRR
 from scapy.sendrecv import *
 import rsa
-import cryptography
 from cryptography.fernet import Fernet, InvalidToken
 
 Connected_Client = {}
