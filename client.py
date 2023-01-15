@@ -8,9 +8,11 @@ from scapy.sendrecv import *
 import rsa
 import cryptography
 from cryptography.fernet import Fernet
-
+import threading
 SERVER_ADDRESS = '127.0.0.1'
 SERVER_PORT = 6493
+REQUEST_PORT = 6493
+RESPONSE_PORT = 6494
 SERVER_INTERFACE = "TAP-ProtonVPN Windows Adapter V9"
 REAL_INTERFACE = conf.iface
 # REAL_INTERFACE = "TAP-ProtonVPN Windows Adapter V9"
@@ -22,22 +24,25 @@ SERVER_PUBLIC_KEY = ''
 SYMMETRIC_KEY = ''
 
 
-def StartConnection(ServerIP, interface):
+def StartConnection(ServerIP, adapter_interface, real_interface):
     """
     Starts the connection with the server, and listens to packets
     """
     global REAL_INTERFACE, REAL_INTERFACE_IP, USED_INTERFACE, SERVER_ADDRESS
-    REAL_INTERFACE = conf.iface
+    REAL_INTERFACE = real_interface
     REAL_INTERFACE_IP = IP().src
-    USED_INTERFACE = interface
+    USED_INTERFACE = adapter_interface
     SERVER_ADDRESS = ServerIP
+    ip = get_if_addr(conf.iface)
+    print(ip)
     confirm_keys()
     if not get_id_from_server(ServerIP):
         print("Server unavailable")
         return
+    t = threading.Thread(target=listen_from_server, args=())
+    t.start()
     TryPacking()
-    listen_from_server()
-    # ListenToPackets()
+    listen_from_adapter(adapter_interface)
 
 
 def MoveToUsed(interface):
@@ -47,16 +52,16 @@ def MoveToUsed(interface):
     subprocess.run(["ip", "route", "change", "default", "via", "169.254.29.157", "dev", interface])
 
 
-def ListenToPackets():
+def listen_from_adapter(adapter_interface):
     """
     listen to packats that are on the vpn's interface
     """
-    sniff(iface=REAL_INTERFACE, prn=ProcessPackets, lfilter=lambda x:  IP in x and x[IP].src != SERVER_ADDRESS)
+    sniff(iface=adapter_interface, prn=ProcessPackets, lfilter=lambda x:  IP in x and x[IP].src == IP().src)
     return
 
 
 def listen_from_server():
-    sniff(iface=REAL_INTERFACE, prn=get_from_server, lfilter=lambda x:  IP in x and x[IP].src == SERVER_ADDRESS)
+    sniff(iface=conf.iface, prn=get_from_server, lfilter=lambda x:  IP in x and x[IP].src == SERVER_ADDRESS)
 
 
 def get_from_server(pkt):
@@ -174,7 +179,7 @@ def get_public_key(ServerIP):
 
 
 def TryPacking():
-    dst_ip = "192.168.1.126"
+    dst_ip = "google.com"
 
     # Create the ICMP packet
     icmp = ICMP()
@@ -234,4 +239,4 @@ def confirm_keys():
 
 
 # Main
-StartConnection(SERVER_ADDRESS, SERVER_INTERFACE)
+StartConnection(SERVER_ADDRESS, conf.iface, conf.iface)

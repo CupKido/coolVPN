@@ -16,6 +16,9 @@ CLIENT_INTERFACE = "TAP-ProtonVPN Windows Adapter V9"
 REAL_INTERFACE = conf.iface
 LOOPBACK_INTERFACE = "Software Loopback Interface 1"
 SERVER_PORT = 6493
+REQUEST_PORT = 6493
+RESPONSE_PORT = 6494
+SERVER_ADDRESS = get_if_addr(conf.iface)
 RSA_KEYS = ()
 
 
@@ -55,10 +58,12 @@ def ProcessPackets(pkt):
        and sends it encrypted with the client's public key
     3. the client already exists, so it changes packet's source to the server's IP and forwards it
     """
-    
+    global RSA_KEYS, SERVER_ADDRESS
+    if not (pkt.haslayer(IP) and (pkt[IP].dst == '127.0.0.1' or pkt[IP].dst == SERVER_ADDRESS)):
+        return
     # check if pkt is a request for the server
-    if(TCP in pkt and pkt[TCP].dport == SERVER_PORT):
-        print("caught relevant package")
+    if TCP in pkt and pkt[TCP].dport == REQUEST_PORT:
+        print("caught REQUSET package")
         # check if client already exists, and process
         if IP in pkt and pkt[IP].src in Connected_Client.keys():
             process_and_forward(pkt, pkt[IP].src)
@@ -80,6 +85,8 @@ def ProcessPackets(pkt):
         if TCP in pkt and pkt[TCP].dport in used_ports.keys():
             process_to_client(pkt)
             return
+        else:
+            return
 
 
 def process_to_client(pkt):
@@ -98,20 +105,25 @@ def process_and_forward(pkt, client_ip):
     """
     decryptes clients package, changes the source to the server's IP, and forwards it
     """
+    global SERVER_ADDRESS
     try:
         if pkt.haslayer(Raw):
             symmetric_key = Connected_Client[client_ip][1]
             fernet = Fernet(symmetric_key)
             enc_data = pkt.getlayer(Raw).load
             client_id, client_packet = pickle.loads(fernet.decrypt(enc_data))
-            pkt.display()
             client_packet.display()
             print("client packet")
-            used_ports[client_packet[TCP].sport] = client_ip
-            response = sr1(client_packet, iface=REAL_INTERFACE, timeout=3)
-            response.display()
-            print("response to client packet")
-            send_to_client(response, '127.0.0.1')
+            if TCP in client_packet:
+                used_ports[client_packet[TCP].sport] = client_ip
+            client_packet[IP].src = SERVER_ADDRESS
+            print("client packet after change")
+            client_packet.display()
+            send(client_packet, iface=REAL_INTERFACE)
+            #response = sr1(client_packet, iface=REAL_INTERFACE, timeout=3)
+            #response.display()
+            #print("response to client packet")
+            #send_to_client(response, '127.0.0.1')
 
         return
     except InvalidToken:
@@ -127,6 +139,18 @@ def send_to_client(pkt, client_ip):
     packet = IP(src='127.0.0.1', dst='127.0.0.1') / TCP(dport=6494, sport=SERVER_PORT) / Raw(enc_data)
     packet.display()
     send(packet, iface=CLIENT_INTERFACE)
+
+def pack_to_client(pkt, client_ip):
+    '''
+    return a packet that is encrypted with the client's symmetric key, and packet
+    '''
+    symmetric_key = Connected_Client[client_ip][1]
+    pkt[IP].dst = client_ip
+    raw_data = pickle.dumps(pkt)
+    fernet = Fernet(symmetric_key)
+    enc_data = fernet.encrypt(raw_data)
+    packet = IP(dst=client_ip) / TCP(sport=SERVER_PORT) / Raw(enc_data)
+    return packet
 
 
 def send_public_key(pkt):
