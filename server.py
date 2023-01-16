@@ -23,6 +23,7 @@ def StartServer():
     global REAL_INTERFACE
     confirm_keys()
     # sniffs the packets and sends them to be processed
+    print('listening...')
     sniff(iface=REAL_INTERFACE, prn=ProcessPackets)
     return
 
@@ -208,7 +209,7 @@ def GenerateAndSendID(original_pkt, data):
         id_packet = IP(dst=original_pkt[IP].src) / \
                     TCP(dport=original_pkt[TCP].sport, sport=REGISTER_PORT) / \
                     get_raw_RSAencrypted_of(new_client_data[0], client_public_key)
-        id_packet.display()
+        #id_packet.display()
         send(id_packet, iface=REAL_INTERFACE)
         print(str(new_client_data))
 
