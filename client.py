@@ -6,14 +6,12 @@ from scapy.sendrecv import *
 import rsa
 from cryptography.fernet import Fernet
 import threading
-SERVER_ADDRESS = '127.0.0.1'
-SERVER_PORT = 6493
-REQUEST_PORT = 6493
-RESPONSE_PORT = 6494
+SERVER_ADDRESS = '192.168.253.241'
+INFO_PORT = 6490
+REGISTER_PORT = 6491
+SERVICE_PORT = 6492
 REAL_INTERFACE = conf.iface
-# REAL_INTERFACE = "TAP-ProtonVPN Windows Adapter V9"
-REAL_INTERFACE_IP = get_if_addr(conf.iface)
-USED_INTERFACE = "Software Loopback Interface 1"
+REAL_INTERFACE_IP = IP().src
 MY_ID = "saar"
 RSA_KEYS = ()
 SERVER_PUBLIC_KEY = ''
@@ -33,14 +31,23 @@ def StartConnection(ServerIP, adapter_interface, real_interface):
     print(ip)
     confirm_keys()
     verify_adapter()
-    if not get_id_from_server(ServerIP):
-        print("Server unavailable")
-        return
+    id_received = False
+    while not id_received:
+        try:
+            id_received = get_id_from_server(ServerIP)
+            if not id_received:
+                print("Server didn't respond, retrying in 3 seconds")
+                time.sleep(3)
+        except:
+            print("ERROR, retrying in 3 seconds")
+            time.sleep(3)
     t = threading.Thread(target=listen_from_server, args=())
     t.start()
     TryHTTP()
     #listen_from_adapter(adapter_interface)
 
+def get_server_response_lambda(port_number):
+    return lambda x: TCP in x and IP in x and x[IP].src == SERVER_ADDRESS and x[TCP].dport == port_number and x[TCP].sport == port_number
 
 def MoveToUsed(interface):
     """
@@ -58,8 +65,8 @@ def listen_from_adapter(adapter_interface):
 
 
 def listen_from_server():
-    global SERVER_ADDRESS, RESPONSE_PORT
-    sniff(iface=conf.iface, prn=get_from_server, lfilter=lambda x:  IP in x and x[IP].src == SERVER_ADDRESS and TCP in x and x[TCP].dport==RESPONSE_PORT)
+    global SERVER_ADDRESS, SERVICE_PORT
+    sniff(iface=conf.iface, prn=get_from_server, lfilter=get_server_response_lambda(SERVICE_PORT))
 
 
 def get_from_server(pkt):
@@ -74,30 +81,27 @@ def ProcessPackets(pkt):
     """
     encrypts the packet with the symmetric key and sends it to the server
     """
-    global SYMMETRIC_KEY
     packet = pack_to_server(pkt)
     packet.display()
     send(packet, iface=REAL_INTERFACE)
-
 
 def get_id_from_server(ServerIP):
     """
     Sends a request for an ID and a symmetric key to the server, and waits for a response
     """
-    global REAL_INTERFACE, USED_INTERFACE, SERVER_PORT, RSA_KEYS, SERVER_PUBLIC_KEY, SYMMETRIC_KEY
+    global REAL_INTERFACE, REGISTER_PORT, RSA_KEYS, SERVER_PUBLIC_KEY, SYMMETRIC_KEY
     # getting the public key
     if not get_public_key(ServerIP):
         return False
     # creating the start connection packet
-    begin_packet = IP(dst=ServerIP) / TCP(sport=6494, dport=SERVER_PORT) / get_raw_RSAencrypted_of("StartConnection",
+    begin_packet = IP(dst=ServerIP) / TCP(sport=REGISTER_PORT, dport=REGISTER_PORT) / get_raw_RSAencrypted_of("StartConnection",
                                                                                                    SERVER_PUBLIC_KEY)
     # creating the client's public key packet
-    key_packet = IP(dst=ServerIP) / TCP(sport=6494, dport=SERVER_PORT) / get_raw_RSAencrypted_of(RSA_KEYS[0],
+    key_packet = IP(dst=ServerIP) / TCP(sport=REGISTER_PORT, dport=REGISTER_PORT) / get_raw_RSAencrypted_of(RSA_KEYS[0],
                                                                                                  SERVER_PUBLIC_KEY)
     # creates a sniffer that listens to packets from the server
     # the sniffer will listen to 4 packets, the first one is the ID, the next 3 are the symmetric key
-    sniffer = AsyncSniffer(iface=REAL_INTERFACE,
-                           lfilter=lambda x: TCP in x and x[TCP].dport == 6494 and x[TCP].sport == SERVER_PORT, count=4)
+    sniffer = AsyncSniffer(iface=REAL_INTERFACE, lfilter=get_server_response_lambda(REGISTER_PORT), count=4)
     sniffer.start()
     # send start connection packet
     # begin_packet.display()
@@ -105,7 +109,7 @@ def get_id_from_server(ServerIP):
     send(begin_packet, iface=REAL_INTERFACE)
     print("waiting")
     # wait to make sure server gets start connection packet first
-    time.sleep(0.1)
+    time.sleep(0.4)
     # send public key packet
     # key_packet.display()
     print("sending key packet")
@@ -118,9 +122,12 @@ def get_id_from_server(ServerIP):
     # analyze the packets
     # the first packet is the ID
     id_pkt = sniffer.results[0]
+    #id_pkt.display()
     if id_pkt.haslayer(Raw):
         global MY_ID
-        data = pickle.loads(rsa.decrypt(id_pkt.getlayer(Raw).load, RSA_KEYS[1]))
+        enc_data = id_pkt.getlayer(Raw).load
+        raw_data = rsa.decrypt(id_pkt.getlayer(Raw).load, RSA_KEYS[1])
+        data = pickle.loads(raw_data)
         MY_ID = data
     # the next 3 packets are the symmetric key
     key_pkt1 = sniffer.results[1]
@@ -135,8 +142,14 @@ def get_id_from_server(ServerIP):
         # saves the symmetric key in the global variable
         SYMMETRIC_KEY = data
         print('Received a symmetric key = ' + str(SYMMETRIC_KEY))
+        fernet = Fernet(SYMMETRIC_KEY)
+        confirm_key = IP(dst=ServerIP) / TCP(sport=REGISTER_PORT, dport=REGISTER_PORT) / Raw(fernet.encrypt(pickle.dumps(MY_ID)))
+        print('waiting for server to listen')
+        time.sleep(0.3)
+        print("Sending confirmation")
+        send(confirm_key, iface=REAL_INTERFACE)
         return True
-
+    return False
 
 def get_raw_RSAencrypted_of(data, PubKey):
     """
@@ -150,18 +163,21 @@ def get_public_key(ServerIP):
     Sends a request to the server to get its public key and saves it in the global variable SERVER_PUBLIC_KEY
     """
     global SERVER_PORT, REAL_INTERFACE, SERVER_PUBLIC_KEY
-    sniffer = AsyncSniffer(iface=REAL_INTERFACE,
-                           lfilter=lambda x: TCP in x and x[TCP].dport == 6494 and x[TCP].sport == SERVER_PORT, count=1)
+    my_ip = get_if_addr(conf.iface)
+    sniffer = AsyncSniffer(iface=REAL_INTERFACE, lfilter=get_server_response_lambda(INFO_PORT), count=1, timeout=5)
     sniffer.start()
-    packet = IP(dst=ServerIP) / TCP(dport=REQUEST_PORT, sport=REQUEST_PORT) / Raw(b'Get Public Key')
+    packet = IP(dst=ServerIP) / TCP(dport=INFO_PORT, sport=INFO_PORT) / Raw(b'Get Public Key')
     # packet.display()
     print("sending get public key packet")
+    send(packet, iface=REAL_INTERFACE)
     send(packet, iface=REAL_INTERFACE)
     sniffer.join()
     if len(sniffer.results) == 0:
         print("no response")
         return False
     newp = sniffer.results[0]
+    #newp.display()
+    #print(REAL_INTERFACE_IP)
     if newp.haslayer(Raw):
         SERVER_PUBLIC_KEY = pickle.loads(newp.getlayer(Raw).load)
         return SERVER_PUBLIC_KEY
@@ -173,7 +189,7 @@ def pack_to_server(pkt):
     enc_data = fernet.encrypt(raw_data)
 
     # creating the packet and sending it
-    return IP(src=REAL_INTERFACE_IP, dst=SERVER_ADDRESS) / TCP(dport=REQUEST_PORT, sport=REQUEST_PORT) / Raw(enc_data)
+    return IP(dst=SERVER_ADDRESS) / TCP(dport=SERVICE_PORT, sport=SERVICE_PORT) / Raw(enc_data)
 
 def unpack_from_server(pkt):
     if pkt.haslayer(Raw):
@@ -183,6 +199,7 @@ def unpack_from_server(pkt):
         return data
 
 def TryHTTP():
+    print("Trying HTTP")
     dst_ip = "google.com"
 
     # Create the ICMP packet
@@ -259,6 +276,7 @@ def confirm_keys():
 def verify_adapter():
     # Check whether the adapter exists
     subprocess.run(['tapctl', 'create', '--name', 'CoolVPN'])
+    subprocess.run(['tapctl', 'connect', 'CoolVPN'])
 
 # Main
-StartConnection(SERVER_ADDRESS, 'CoolVPN', 'CoolVPN')
+StartConnection(SERVER_ADDRESS, 'CoolVPN', REAL_INTERFACE)
