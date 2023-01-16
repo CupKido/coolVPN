@@ -7,24 +7,25 @@ from scapy.layers.dns import *
 from scapy.layers.inet import *
 from scapy.sendrecv import *
 
-SERVER_ADDRESS = '192.168.253.56'
+SERVER_ADDRESS = '192.168.113.241'
 INFO_PORT = 6490
 REGISTER_PORT = 6491
 SERVICE_PORT = 6492
 REAL_INTERFACE = conf.iface
 REAL_INTERFACE_IP = IP().src
+USED_INTERFACE = 'CoolVPN'
 MY_ID = "saar"
 RSA_KEYS = ()
 SERVER_PUBLIC_KEY = ''
 SYMMETRIC_KEY = ''
-
+DISCONNECTED_WAIT_TIME = 5
 
 def StartConnection(ServerIP, adapter_interface, real_interface):
     """
     Starts the connection with the server, and listens to packets
     """
     global REAL_INTERFACE, REAL_INTERFACE_IP, USED_INTERFACE, SERVER_ADDRESS
-    REAL_INTERFACE = real_interface
+    REAL_INTERFACE = conf.iface
     REAL_INTERFACE_IP = IP().src
     USED_INTERFACE = adapter_interface
     SERVER_ADDRESS = ServerIP
@@ -32,20 +33,21 @@ def StartConnection(ServerIP, adapter_interface, real_interface):
     print(ip)
     confirm_keys()
     verify_adapter()
+    print(REAL_INTERFACE)
     id_received = False
     while not id_received:
         try:
             id_received = get_id_from_server(ServerIP)
             if not id_received:
-                print("Server didn't respond, retrying in 3 seconds")
-                time.sleep(3)
+                print("Server didn't respond, retrying in " + str(DISCONNECTED_WAIT_TIME) + " seconds")
+                time.sleep(DISCONNECTED_WAIT_TIME)
         except:
-            print("ERROR, retrying in 3 seconds")
-            time.sleep(3)
+            print("ERROR, retrying in " + str(DISCONNECTED_WAIT_TIME) + " seconds")
+            time.sleep(DISCONNECTED_WAIT_TIME)
     t = threading.Thread(target=listen_from_server, args=())
     t.start()
     TryHTTP()
-    #listen_from_adapter(adapter_interface)
+    listen_from_adapter(adapter_interface)
 
 def get_server_response_lambda(port_number):
     return lambda x: TCP in x and IP in x and x[IP].src == SERVER_ADDRESS and x[TCP].dport == port_number and x[TCP].sport == port_number
@@ -215,16 +217,17 @@ def TryHTTP():
     # Send the packet and receive the response
 
     # Create an IP packet
-    ip = IP(src=get_if_addr(conf.iface), dst="google.com")
-
+    ip = IP(dst="info.cern.ch")
+    
     # Create a TCP packet
-    tcp = TCP(dport=80, sport=12346)
+    #Create a SYN packet
+    tcp = TCP(dport=80, flags='S')
     # Create an HTTP request packet
     http_req = "GET / HTTP/1.1\r\n\r\n"
 
     # Combine the IP and TCP packets with the HTTP request packet
-    pkt = ip/tcp/http_req
-
+    pkt = ip/tcp
+    send(pkt)
     # Send the packet
 
 # Send the packet
@@ -277,7 +280,6 @@ def confirm_keys():
 def verify_adapter():
     # Check whether the adapter exists
     subprocess.run(['tapctl', 'create', '--name', 'CoolVPN'])
-    subprocess.run(['tapctl', 'connect', 'CoolVPN'])
 
 # Main
 StartConnection(SERVER_ADDRESS, 'CoolVPN', REAL_INTERFACE)

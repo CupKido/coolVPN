@@ -114,10 +114,6 @@ def process_and_forward(pkt, client_ip):
             elif UDP in client_packet:
                 used_ports[client_packet[UDP].sport] = client_ip
             send(client_packet, iface=REAL_INTERFACE)
-            # response = sr1(client_packet, iface=REAL_INTERFACE, timeout=3)
-            # response.display()
-            # print("response to client packet")
-            # send_to_client(response, '127.0.0.1')
 
         return
     except InvalidToken:
