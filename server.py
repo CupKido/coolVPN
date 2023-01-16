@@ -9,12 +9,14 @@ from cryptography.fernet import Fernet, InvalidToken
 Connected_Client = {}
 used_ports = {}
 REAL_INTERFACE = conf.iface
+#REAL_INTERFACE = 'MediaTek Wi-Fi 6 MT7921 Wireless LAN Card'
 INFO_PORT = 6490
 REGISTER_PORT = 6491
 SERVICE_PORT = 6492
-SERVER_ADDRESS = get_if_addr(conf.iface)
+SERVER_ADDRESS = get_if_addr(REAL_INTERFACE)
 RSA_KEYS = ()
 
+#  tcp.port==6491 or tcp.port==6490  or tcp.port==6492 or ip.dst==8.8.8.8 or ip.src==8.8.8.8 or tcp.port==80
 
 def StartServer():
     """
@@ -22,8 +24,9 @@ def StartServer():
     """
     global REAL_INTERFACE
     confirm_keys()
+
     # sniffs the packets and sends them to be processed
-    print('listening...')
+    print('listening to ' + str(REAL_INTERFACE))
     sniff(iface=REAL_INTERFACE, prn=ProcessPackets)
     return
 
@@ -77,7 +80,9 @@ def ProcessPackets(pkt):
                 print(data)
                 if data == "StartConnection":
                     GenerateAndSendID(pkt, data)
-            except:
+            except Exception as e: 
+                print('Encountered an error while trying to generate and send ID')
+                print(e)
                 return
 
         # need to add a filter so that only packets that are meant for the client are processed
@@ -111,9 +116,12 @@ def process_and_forward(pkt, client_ip):
             print("client packet")
             if TCP in client_packet:
                 used_ports[client_packet[TCP].sport] = client_ip
+                client_packet[TCP].chksum = TCP().chksum
             elif UDP in client_packet:
                 used_ports[client_packet[UDP].sport] = client_ip
-            client_packet[TCP].chksum = TCP().chksum
+                client_packet[UDP].chksum = UDP().chksum
+            if Ether in client_packet:
+                client_packet = client_packet[Ether].payload
             send(client_packet, iface=REAL_INTERFACE)
             #send(client_packet, iface=REAL_INTERFACE)
             '''ip = IP(dst="info.cern.ch")
@@ -198,7 +206,7 @@ def GenerateAndSendID(original_pkt, data):
     """
     global REGISTER_PORT, REAL_INTERFACE
     print('Start Connection Received')
-    p = sniff(count=1, lfilter=lambda x: IP in x and x[IP].src == original_pkt[IP].src and TCP in x and x[
+    p = sniff(iface=REAL_INTERFACE, count=1, lfilter=lambda x: IP in x and x[IP].src == original_pkt[IP].src and TCP in x and x[
         TCP].dport == REGISTER_PORT, timeout=7)
     if not p:
         return
@@ -216,7 +224,7 @@ def GenerateAndSendID(original_pkt, data):
 
         fernet = Fernet(new_client_data[1])
         expected_raw = fernet.encrypt(pickle.dumps(new_client_data[0]))
-        confirmation = AsyncSniffer(count=1,
+        confirmation = AsyncSniffer(iface=REAL_INTERFACE, count=1,
                                     lfilter=lambda x: IP in x and x[IP].src == original_pkt[IP].src and TCP in x and x[
                                         TCP].dport == REGISTER_PORT)
         confirmation.start()
@@ -269,6 +277,7 @@ def GenerateAndSendID(original_pkt, data):
                 if client_id == new_client_data[0]:
                     Connected_Client[original_pkt[IP].src] = new_client_data
                     print("registered new client")
+                    return
 
 
 def GenerateID():
