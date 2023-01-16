@@ -146,7 +146,7 @@ def get_id_from_server(ServerIP):
         fernet = Fernet(SYMMETRIC_KEY)
         confirm_key = IP(dst=ServerIP) / TCP(sport=REGISTER_PORT, dport=REGISTER_PORT) / Raw(fernet.encrypt(pickle.dumps(MY_ID)))
         print('waiting for server to listen')
-        time.sleep(0.3)
+        time.sleep(1)
         print("Sending confirmation")
         send(confirm_key, iface=REAL_INTERFACE)
         return True
