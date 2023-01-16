@@ -10,7 +10,6 @@ SERVER_ADDRESS = '127.0.0.1'
 SERVER_PORT = 6493
 REQUEST_PORT = 6493
 RESPONSE_PORT = 6494
-SERVER_INTERFACE = "TAP-ProtonVPN Windows Adapter V9"
 REAL_INTERFACE = conf.iface
 # REAL_INTERFACE = "TAP-ProtonVPN Windows Adapter V9"
 REAL_INTERFACE_IP = get_if_addr(conf.iface)
@@ -33,6 +32,7 @@ def StartConnection(ServerIP, adapter_interface, real_interface):
     ip = get_if_addr(conf.iface)
     print(ip)
     confirm_keys()
+    verify_adapter()
     if not get_id_from_server(ServerIP):
         print("Server unavailable")
         return
@@ -101,6 +101,7 @@ def get_id_from_server(ServerIP):
     sniffer.start()
     # send start connection packet
     # begin_packet.display()
+    print("sending start connection packet")
     send(begin_packet, iface=REAL_INTERFACE)
     print("waiting")
     # wait to make sure server gets start connection packet first
@@ -152,8 +153,9 @@ def get_public_key(ServerIP):
     sniffer = AsyncSniffer(iface=REAL_INTERFACE,
                            lfilter=lambda x: TCP in x and x[TCP].dport == 6494 and x[TCP].sport == SERVER_PORT, count=1)
     sniffer.start()
-    packet = IP(dst=ServerIP) / TCP(dport=SERVER_PORT, sport=6494) / Raw(b'Get Public Key')
+    packet = IP(dst=ServerIP) / TCP(dport=REQUEST_PORT, sport=REQUEST_PORT) / Raw(b'Get Public Key')
     # packet.display()
+    print("sending get public key packet")
     send(packet, iface=REAL_INTERFACE)
     sniffer.join()
     if len(sniffer.results) == 0:
@@ -254,6 +256,9 @@ def confirm_keys():
         print("keys generated.")
     RSA_KEYS = key_set
 
+def verify_adapter():
+    # Check whether the adapter exists
+    subprocess.run(['tapctl', 'create', '--name', 'CoolVPN'])
 
 # Main
-StartConnection(SERVER_ADDRESS, conf.iface, conf.iface)
+StartConnection(SERVER_ADDRESS, 'CoolVPN', 'CoolVPN')

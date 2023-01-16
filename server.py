@@ -9,10 +9,7 @@ from cryptography.fernet import Fernet, InvalidToken
 Connected_Client = {}
 used_ports = {}
 # CLIENT_INTERFACE = "TAP-Surfshark Windows Adapter V9"
-CLIENT_INTERFACE = "TAP-ProtonVPN Windows Adapter V9"
-REAL_INTERFACE = conf.iface
-LOOPBACK_INTERFACE = "Software Loopback Interface 1"
-SERVER_PORT = 6493
+REAL_INTERFACE = 'CoolVPN'
 REQUEST_PORT = 6493
 RESPONSE_PORT = 6494
 SERVER_ADDRESS = get_if_addr(conf.iface)
@@ -73,10 +70,13 @@ def ProcessPackets(pkt):
                 return
             # check if packet is a request for a connection
             raw_data = pkt.getlayer(Raw).load
-            data = pickle.loads(rsa.decrypt(raw_data, RSA_KEYS[1]))
-            print(data)
-            if data == "StartConnection":
-                GenerateAndSendID(pkt, data)
+            try:
+                data = pickle.loads(rsa.decrypt(raw_data, RSA_KEYS[1]))
+                print(data)
+                if data == "StartConnection":
+                    GenerateAndSendID(pkt, data)
+            except:
+                return
     else:
         # need to add a filter so that only packets that are meant for the client are processed
         if TCP in pkt and pkt[TCP].dport in used_ports.keys():
@@ -166,7 +166,8 @@ def send_public_key(pkt):
     global RSA_KEYS
     raw_data = RSA_KEYS[0]
     if pkt.haslayer(TCP):
-        packet = IP(dst=pkt[IP].src) / TCP(dport=pkt[TCP].sport, sport=SERVER_PORT) / get_raw_of(raw_data)
+        packet = IP(dst=pkt[IP].src) / TCP(dport=pkt[TCP].sport, sport=REQUEST_PORT) / get_raw_of(raw_data)
+        print("sending public key to client")
         send(packet, iface=REAL_INTERFACE)
     
 
@@ -176,13 +177,16 @@ def GenerateAndSendID(original_pkt, data):
     Generates an ID, and asymetric key and sends it encrypted with the client's public key
     """
     global SERVER_PORT, CLIENT_INTERFACE, REAL_INTERFACE
+    print('Start Connection Received')
     p = sniff(count=1, lfilter=lambda x: IP in x and x[IP].src == original_pkt[IP].src and TCP in x and x[
         TCP].dport == SERVER_PORT, timeout=3)
     if not p:
         return
+    
     key_pkt = p[0]
     if key_pkt.haslayer(Raw):
         global MY_ID
+        print("got the client's public key")
         data = key_pkt.getlayer(Raw).load
         # decrypting the client's public key
         client_public_key = pickle.loads(rsa.decrypt(data, RSA_KEYS[1]))
@@ -227,6 +231,7 @@ def GenerateID():
     res = ""
     for x in range(5):
         res += str(r.randint(0, 9))
+    print("ID generated: " + res)
     return res
 
 
