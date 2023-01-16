@@ -113,8 +113,13 @@ def process_and_forward(pkt, client_ip):
                 used_ports[client_packet[TCP].sport] = client_ip
             elif UDP in client_packet:
                 used_ports[client_packet[UDP].sport] = client_ip
+            client_packet[TCP].chksum = TCP().chksum
             send(client_packet, iface=REAL_INTERFACE)
-
+            #send(client_packet, iface=REAL_INTERFACE)
+            '''ip = IP(dst="info.cern.ch")
+            tcp = TCP(dport=80, sport=40, flags='S')
+            pkt = ip/tcp
+            send(pkt)'''
         return
     except InvalidToken:
         return
@@ -156,7 +161,22 @@ def unpack_from_client(pkt):
         fernet = Fernet(symmetric_key)
         enc_data = pkt.getlayer(Raw).load
         client_id, client_packet = pickle.loads(fernet.decrypt(enc_data))
-        client_packet[IP].src = SERVER_ADDRESS
+        #client_packet[IP].src = SERVER_ADDRESS
+        client_packet[IP].src = None
+        client_packet[IP].chksum = None
+        del client_packet[IP].chksum
+        if TCP in client_packet:
+            client_packet[TCP].chksum = None
+            del client_packet[TCP].chksum
+            client_packet[TCP].window = None
+            del client_packet[TCP].window
+        if UDP in client_packet:
+            client_packet[UDP].chksum = None
+            del client_packet[UDP].chksum
+        
+        
+        #client_packet[TCP].sport = 45
+        #client_packet = Ether() / client_packet
         return client_id, client_packet
 
 
