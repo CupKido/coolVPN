@@ -8,10 +8,10 @@ from cryptography.fernet import Fernet, InvalidToken
 
 Connected_Client = {}
 used_ports = {}
-# CLIENT_INTERFACE = "TAP-Surfshark Windows Adapter V9"
-REAL_INTERFACE = 'CoolVPN'
-REQUEST_PORT = 6493
-RESPONSE_PORT = 6494
+REAL_INTERFACE = conf.iface
+INFO_PORT = 6490
+REGISTER_PORT = 6491
+SERVICE_PORT = 6492
 SERVER_ADDRESS = get_if_addr(conf.iface)
 RSA_KEYS = ()
 
@@ -20,7 +20,7 @@ def StartServer():
     """
     Starts the server
     """
-    global CLIENT_INTERFACE, SERVER_PORT, REAL_INTERFACE
+    global REAL_INTERFACE
     confirm_keys()
     # sniffs the packets and sends them to be processed
     sniff(iface=REAL_INTERFACE, prn=ProcessPackets)
@@ -55,19 +55,20 @@ def ProcessPackets(pkt):
     global RSA_KEYS, SERVER_ADDRESS
     if not (pkt.haslayer(IP) and (pkt[IP].dst == '127.0.0.1' or pkt[IP].dst == SERVER_ADDRESS)):
         return
-    # check if pkt is a request for the server
-    if TCP in pkt and pkt[TCP].dport == REQUEST_PORT or UDP in pkt and pkt[UDP].dport == REQUEST_PORT:
-        print("caught REQUSET package")
-        # check if client already exists, and process
-        if IP in pkt and pkt[IP].src in Connected_Client.keys():
-            process_and_forward(pkt, pkt[IP].src)
-            return
-        # check if packet has content
-        if pkt.haslayer(Raw):
-            # check if packet is a request for public key
-            if pkt.getlayer(Raw).load == b'Get Public Key':
-                send_public_key(pkt)
+    if TCP in pkt:
+        if pkt[TCP].dport == SERVICE_PORT or UDP in pkt and pkt[UDP].dport == SERVICE_PORT:
+            print("caught REQUSET package")
+            # check if client already exists, and process
+            if IP in pkt and pkt[IP].src in Connected_Client.keys():
+                process_and_forward(pkt, pkt[IP].src)
                 return
+            # check if packet has content
+        if pkt[TCP].dport == INFO_PORT or UDP in pkt and pkt[UDP].dport == INFO_PORT:
+            if pkt.haslayer(Raw):
+                # check if packet is a request for public key
+                if pkt.getlayer(Raw).load == b'Get Public Key':
+                    send_public_key(pkt)
+        if pkt[TCP].dport == REGISTER_PORT or UDP in pkt and pkt[UDP].dport == REGISTER_PORT:
             # check if packet is a request for a connection
             raw_data = pkt.getlayer(Raw).load
             try:
@@ -77,16 +78,14 @@ def ProcessPackets(pkt):
                     GenerateAndSendID(pkt, data)
             except:
                 return
-    else:
+
         # need to add a filter so that only packets that are meant for the client are processed
-        if TCP in pkt and pkt[TCP].dport in used_ports.keys():
+        if pkt[TCP].dport in used_ports.keys():
             process_to_client(pkt, pkt[TCP].dport)
-            return
-        elif UDP in pkt and pkt[UDP].dport in used_ports.keys():
-            process_to_client(pkt, pkt[UDP].dport)
-            return
-        else:
-            return
+    elif UDP in pkt and pkt[UDP].dport in used_ports.keys():
+        process_to_client(pkt, pkt[UDP].dport)
+
+    # check if pkt is a request for the server
 
 
 def process_to_client(pkt, port):
@@ -97,6 +96,7 @@ def process_to_client(pkt, port):
     packet = pack_to_client(pkt, client_ip)
     packet.display()
     send(packet, iface=REAL_INTERFACE)
+
 
 def process_and_forward(pkt, client_ip):
     """
@@ -113,10 +113,10 @@ def process_and_forward(pkt, client_ip):
             elif UDP in client_packet:
                 used_ports[client_packet[UDP].sport] = client_ip
             send(client_packet, iface=REAL_INTERFACE)
-            #response = sr1(client_packet, iface=REAL_INTERFACE, timeout=3)
-            #response.display()
-            #print("response to client packet")
-            #send_to_client(response, '127.0.0.1')
+            # response = sr1(client_packet, iface=REAL_INTERFACE, timeout=3)
+            # response.display()
+            # print("response to client packet")
+            # send_to_client(response, '127.0.0.1')
 
         return
     except InvalidToken:
@@ -124,29 +124,33 @@ def process_and_forward(pkt, client_ip):
 
 
 def send_to_client(pkt, client_ip):
-
+    """
+    decryptes clients package, changes the source to the server's IP, and forwards it
+    """
     symmetric_key = Connected_Client[client_ip][1]
     raw_data = pickle.dumps(pkt)
     fernet = Fernet(symmetric_key)
     enc_data = fernet.encrypt(raw_data)
-    packet = IP(src='127.0.0.1', dst='127.0.0.1') / TCP(dport=6494, sport=SERVER_PORT) / Raw(enc_data)
+    packet = IP(dst=client_ip) / TCP(dport=6494, sport=SERVICE_PORT) / Raw(enc_data)
     packet.display()
-    send(packet, iface=CLIENT_INTERFACE)
+    send(packet, iface=REAL_INTERFACE)
+
 
 def pack_to_client(pkt, client_ip):
-    '''
+    """
     return a packet that is encrypted with the client's symmetric key, and packet
-    '''
-    global RESPONSE_PORT
+    """
+    global SERVICE_PORT
     symmetric_key = Connected_Client[client_ip][1]
     pkt[IP].dst = client_ip
     raw_data = pickle.dumps(pkt)
     fernet = Fernet(symmetric_key)
     enc_data = fernet.encrypt(raw_data)
-    packet = IP(dst=client_ip) / TCP(sport=RESPONSE_PORT, dport=RESPONSE_PORT) / Raw(enc_data)
+    packet = IP(dst=client_ip) / TCP(sport=SERVICE_PORT, dport=SERVICE_PORT) / Raw(enc_data)
     return packet
 
-def unpack_from_client(pkt): #
+
+def unpack_from_client(pkt):
     if IP not in pkt:
         return
     client_ip = pkt[IP].src
@@ -166,23 +170,22 @@ def send_public_key(pkt):
     global RSA_KEYS
     raw_data = RSA_KEYS[0]
     if pkt.haslayer(TCP):
-        packet = IP(dst=pkt[IP].src) / TCP(dport=pkt[TCP].sport, sport=REQUEST_PORT) / get_raw_of(raw_data)
+        packet = IP(dst=pkt[IP].src) / TCP(dport=pkt[TCP].sport, sport=INFO_PORT) / get_raw_of(raw_data)
         print("sending public key to client")
         send(packet, iface=REAL_INTERFACE)
-    
 
 
 def GenerateAndSendID(original_pkt, data):
     """
     Generates an ID, and asymetric key and sends it encrypted with the client's public key
     """
-    global SERVER_PORT, CLIENT_INTERFACE, REAL_INTERFACE
+    global REGISTER_PORT, REAL_INTERFACE
     print('Start Connection Received')
     p = sniff(count=1, lfilter=lambda x: IP in x and x[IP].src == original_pkt[IP].src and TCP in x and x[
-        TCP].dport == SERVER_PORT, timeout=3)
+        TCP].dport == REGISTER_PORT, timeout=7)
     if not p:
         return
-    
+
     key_pkt = p[0]
     if key_pkt.haslayer(Raw):
         global MY_ID
@@ -193,34 +196,62 @@ def GenerateAndSendID(original_pkt, data):
         print("clients public = " + str(client_public_key))
         # generating a new ID and symmetric key, and saving them in the clients dictionary based on client's IP
         new_client_data = (GenerateID(), GenerateSymmetric())
-        Connected_Client[original_pkt[IP].src] = new_client_data
+
+        fernet = Fernet(new_client_data[1])
+        expected_raw = fernet.encrypt(pickle.dumps(new_client_data[0]))
+        confirmation = AsyncSniffer(count=1,
+                                    lfilter=lambda x: IP in x and x[IP].src == original_pkt[IP].src and TCP in x and x[
+                                        TCP].dport == REGISTER_PORT)
+        confirmation.start()
+
         # sending the ID
-        id_packet = IP(dst=original_pkt[IP].src) / TCP(dport=original_pkt[TCP].sport,
-                                                       sport=SERVER_PORT) / get_raw_RSAencrypted_of(new_client_data[0],
-                                                                                                    client_public_key)
+        id_packet = IP(dst=original_pkt[IP].src) / \
+                    TCP(dport=original_pkt[TCP].sport, sport=REGISTER_PORT) / \
+                    get_raw_RSAencrypted_of(new_client_data[0], client_public_key)
         id_packet.display()
         send(id_packet, iface=REAL_INTERFACE)
         print(str(new_client_data))
+
         # splits the symmetric key to three parts
         bytes_packet = pickle.dumps(new_client_data[1])
         third = int(len(bytes_packet) / 3)
         parts = (bytes_packet[:third], bytes_packet[third:2 * third], bytes_packet[2 * third:])
-        # sends the symmetric key parts
+
+        # sends the symmetric key in parts
         # part 1
-        key_packet1 = IP(dst=original_pkt[IP].src) / TCP(dport=original_pkt[TCP].sport, sport=SERVER_PORT) / Raw(
+        key_packet1 = IP(dst=original_pkt[IP].src) / TCP(dport=original_pkt[TCP].sport, sport=REGISTER_PORT) / Raw(
             rsa.encrypt(parts[0], client_public_key))
-        key_packet1.display()
+        # key_packet1.display()
         send(key_packet1, iface=REAL_INTERFACE)
+
         # part 2
-        key_packet2 = IP(dst=original_pkt[IP].src) / TCP(dport=original_pkt[TCP].sport, sport=SERVER_PORT) / Raw(
+        key_packet2 = IP(dst=original_pkt[IP].src) / TCP(dport=original_pkt[TCP].sport, sport=REGISTER_PORT) / Raw(
             rsa.encrypt(parts[1], client_public_key))
-        key_packet2.display()
+        # key_packet2.display()
         send(key_packet2, iface=REAL_INTERFACE)
+
         # part 3
-        key_packet3 = IP(dst=original_pkt[IP].src) / TCP(dport=original_pkt[TCP].sport, sport=SERVER_PORT) / Raw(
+        key_packet3 = IP(dst=original_pkt[IP].src) / TCP(dport=original_pkt[TCP].sport, sport=REGISTER_PORT) / Raw(
             rsa.encrypt(parts[2], client_public_key))
-        key_packet3.display()
+        # key_packet3.display()
         send(key_packet3, iface=REAL_INTERFACE)
+        print("listening")
+
+        confirmation.join()
+        if not confirmation:
+            print("got nothing")
+            return
+        if confirmation.results:
+            if confirmation.results[0].haslayer(Raw):
+                raw_data = confirmation.results[0].getlayer(Raw).load
+                fernet = Fernet(new_client_data[1])
+                client_id = pickle.loads(fernet.decrypt(raw_data))
+                print(client_id, new_client_data[0])
+                print("client confinmrms")
+
+                if client_id == new_client_data[0]:
+                    Connected_Client[original_pkt[IP].src] = new_client_data
+                    print("registered new client")
 
 
 def GenerateID():
@@ -261,5 +292,6 @@ def get_raw_AESencrypted_of(ID, data):
 def get_raw_of(data): return Raw(pickle.dumps(data))
 
 
+print(SERVER_ADDRESS)
 # Main
 StartServer()
