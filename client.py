@@ -1,12 +1,13 @@
 import pickle
-import subprocess
-from scapy.layers.inet import *
-from scapy.layers.dns import *
-from scapy.sendrecv import *
+import threading
+
 import rsa
 from cryptography.fernet import Fernet
-import threading
-SERVER_ADDRESS = '192.168.253.241'
+from scapy.layers.dns import *
+from scapy.layers.inet import *
+from scapy.sendrecv import *
+
+SERVER_ADDRESS = '192.168.253.56'
 INFO_PORT = 6490
 REGISTER_PORT = 6491
 SERVICE_PORT = 6492
