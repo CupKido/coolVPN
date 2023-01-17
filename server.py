@@ -367,7 +367,6 @@ def main():
     parser.add_argument("-i", "--interface", help="interface to listen on")
     parser.add_argument("-t", "--tester", help="which tester's settings to use")
     args = parser.parse_args()
-    args.tester = 'saar'
     if args.tester is None:
         interface = args.interface
         if interface is None:
