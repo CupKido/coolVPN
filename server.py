@@ -231,7 +231,7 @@ def send_public_key(pkt):
     global RSA_KEYS
     raw_data = RSA_KEYS[0]
     if pkt.haslayer(TCP):
-        packet = IP(dst=pkt[IP].src) / TCP(dport=pkt[TCP].sport, sport=INFO_PORT) / get_raw_of(raw_data)
+        packet = IP(dst=pkt[IP].src) / TCP(dport=pkt[TCP].sport, sport=INFO_PORT, flags=0) / get_raw_of(raw_data)
         print("sending public key to client")
         packet.display()
         send(packet, iface=REAL_INTERFACE)
