@@ -6,12 +6,18 @@ from scapy.sendrecv import *
 import rsa
 from cryptography.fernet import Fernet, InvalidToken
 import argparse 
+import threading
+import time
+from threading import Event
 
 Connected_Client = {}
 used_ports = {}
+temp_connections = {}
 #REAL_INTERFACE = conf.iface
 #REAL_INTERFACE = "Intel(R) Dual Band Wireless-AC 8260"
 #REAL_INTERFACE = "MediaTek Wi-Fi 6 MT7921 Wireless LAN Card"
+testers_settings = {'saar' : 'MediaTek Wi-Fi 6 MT7921 Wireless LAN Card',
+                    'shoham' : 'Intel(R) Dual Band Wireless-AC 8260'}
 REAL_INTERFACE = ''
 INFO_PORT = 6490
 REGISTER_PORT = 6491
@@ -25,7 +31,7 @@ def StartServer(interface):
     """
     Starts the server
     """
-    global REAL_INTERFACE
+    global REAL_INTERFACE, SERVER_ADDRESS
     REAL_INTERFACE = interface  
     SERVER_ADDRESS = get_if_addr(REAL_INTERFACE)
     print(SERVER_ADDRESS)
@@ -96,6 +102,8 @@ def ProcessPackets(pkt):
             process_to_client(pkt, pkt[TCP].dport)
     elif UDP in pkt and (pkt[UDP].dport, pkt[IP].src) in used_ports.keys():
         process_to_client(pkt, pkt[UDP].dport)
+    elif ICMP in pkt and pkt[IP].src in temp_connections.keys():
+        process_to_client(pkt, 0)
 
     # check if pkt is a request for the server
 
@@ -104,7 +112,10 @@ def process_to_client(pkt, port):
     """
     encrypts the packet and sends it to the client
     """
-    client_ip_outer, client_ip_inner  = used_ports[(port, pkt[IP].src)]
+    if TCP in pkt or UDP in pkt:
+        client_ip_outer, client_ip_inner = used_ports[(port, pkt[IP].src)]
+    elif ICMP in pkt:
+        client_ip_outer, client_ip_inner, thread  = temp_connections[pkt[IP].src]
     print('packet from app:')
     pkt.display()
     packet = pack_to_client(pkt, client_ip_outer, client_ip_inner)
@@ -117,6 +128,7 @@ def process_and_forward(pkt, client_ip):
     """
     decryptes clients package, changes the source to the server's IP, and forwards it
     """
+    
     global SERVER_ADDRESS
     try:
         if pkt.haslayer(Raw):
@@ -131,10 +143,27 @@ def process_and_forward(pkt, client_ip):
             elif UDP in client_packet:
                 sport = client_packet[UDP].sport 
                 client_packet[UDP].chksum = UDP().chksum
-            dict_key = (sport, client_packet[IP].dst)
-            dict_val = (client_ip, original_inner_id)
-            used_ports[dict_key] = dict_val
-            print(str(dict_key) + ' : ' + str(dict_val))
+            
+            if TCP in client_packet or UDP in client_packet:
+                dict_key = (sport, client_packet[IP].dst)
+                dict_val = (client_ip, original_inner_id)
+                used_ports[dict_key] = dict_val
+                print(str(dict_key) + ' : ' + str(dict_val))
+            
+            if ICMP in client_packet:
+                dict_key = client_packet[IP].dst
+
+                # if the client already exists, terminate the old thread
+                if dict_key in temp_connections.keys():
+                    temp_connections[dict_key][2].set()
+                    temp_connections.pop(dict_key)
+
+                kill_thread = Event()
+                t = threading.Thread(target=terminate_temp_connection, args=(dict_key, 10, kill_thread))
+                dict_val = (client_ip, original_inner_id, kill_thread)
+                temp_connections[dict_key] = dict_val
+                t.start()
+
             if Ether in client_packet:
                 client_packet = client_packet[Ether].payload
             send(client_packet, iface=REAL_INTERFACE)
@@ -186,7 +215,9 @@ def unpack_from_client(pkt):
         if UDP in client_packet:
             client_packet[UDP].chksum = None
             del client_packet[UDP].chksum
-        
+        if ICMP in client_packet:
+            client_packet[ICMP].chksum = None
+            del client_packet[ICMP].chksum
         
         #client_packet[TCP].sport = 45
         #client_packet = Ether() / client_packet
@@ -323,16 +354,27 @@ def get_raw_AESencrypted_of(ID, data):
 def get_raw_of(data): return Raw(pickle.dumps(data))
 
 
-
+def terminate_temp_connection(dst_ip, sleep_time, event):
+    time.sleep(sleep_time)
+    if event.is_set():
+        return
+    print("terminating connection")
+    temp_connections.pop(dst_ip)
 
 def main():
     #get interface argument with argparser
     parser = argparse.ArgumentParser()
     parser.add_argument("-i", "--interface", help="interface to listen on")
+    parser.add_argument("-t", "--tester", help="which tester's settings to use")
     args = parser.parse_args()
-    interface = args.interface
-    if interface is None:
-        interface = conf.iface
+    args.tester = 'saar'
+    if args.tester is None:
+        interface = args.interface
+        if interface is None:
+            interface = conf.iface
+    else:
+        interface = testers_settings[args.tester]
+    
     StartServer(interface)
 
 if __name__ == "__main__":
