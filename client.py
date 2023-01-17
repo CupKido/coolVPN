@@ -5,15 +5,17 @@ import rsa
 from cryptography.fernet import Fernet
 from scapy.layers.dns import *
 from scapy.layers.inet import *
+from scapy.layers.l2 import *
 from scapy.sendrecv import *
 
-SERVER_ADDRESS = '192.168.113.56'
+SERVER_ADDRESS = '192.168.113.241'
 INFO_PORT = 6490
 REGISTER_PORT = 6491
 SERVICE_PORT = 6492
-REAL_INTERFACE = conf.iface
-REAL_INTERFACE_IP = IP().src
-USED_INTERFACE = 'CoolVPN'
+#REAL_INTERFACE = conf.iface
+REAL_INTERFACE = ''
+REAL_INTERFACE_IP = ''
+USED_INTERFACE = ''
 MY_ID = "saar"
 RSA_KEYS = ()
 SERVER_PUBLIC_KEY = ''
@@ -26,14 +28,15 @@ def StartConnection(ServerIP, adapter_interface, real_interface):
     Starts the connection with the server, and listens to packets
     """
     global REAL_INTERFACE, REAL_INTERFACE_IP, USED_INTERFACE, SERVER_ADDRESS
-    REAL_INTERFACE = conf.iface
-    REAL_INTERFACE_IP = IP().src
+    REAL_INTERFACE = real_interface
+    REAL_INTERFACE_IP = get_if_addr(REAL_INTERFACE)
     USED_INTERFACE = adapter_interface
     SERVER_ADDRESS = ServerIP
     ip = get_if_addr(conf.iface)
     print(ip)
     confirm_keys()
     verify_adapter()
+    #listen_from_adapter(USED_INTERFACE)
     print(REAL_INTERFACE)
     id_received = False
     while not id_received:
@@ -68,7 +71,7 @@ def listen_from_adapter(interface):
     listen to packets that are on the vpn's interface
     """
     sniff(iface=interface, prn=ProcessPackets,
-          lfilter=lambda x: IP in x and x[IP].src == get_if_addr(conf.iface))
+          lfilter=lambda x: (IP in x and x[IP].src == get_if_addr(conf.iface)) or ARP in x)
     return
 
 
@@ -92,10 +95,23 @@ def ProcessPackets(pkt):
     """
     encrypts the packet with the symmetric key and sends it to the server
     """
+    if ARP in pkt:
+        respond_to_arp(pkt)
+        return
     packet = pack_to_server(pkt)
     pkt.display()
     send(packet, iface=REAL_INTERFACE)
 
+def respond_to_arp(pkt):
+    """
+    responds to arp requests
+    """
+    global REAL_INTERFACE_IP, USED_INTERFACE
+    if ARP in pkt and pkt[ARP].op == 1: # If the packet is an ARP request
+        target_ip = pkt[ARP].pdst # Get the target IP address from the packet
+        src_mac = get_if_hwaddr(USED_INTERFACE) # Get the caller's MAC address
+        arp_reply = ARP(hwsrc=src_mac, psrc=target_ip, hwdst=pkt[ARP].hwsrc, pdst=pkt[ARP].psrc, op=2) # Create the ARP reply packet
+        send(arp_reply, iface=USED_INTERFACE)
 
 def get_id_from_server(ServerIP):
     """
@@ -231,7 +247,7 @@ def TryHTTP():
     # Send the packet and receive the response
 
     # Create an IP packet
-    ip = IP(dst="info.cern.ch")
+    ip = IP(dst="info.cern.ch", id=1234)
 
     # Create a TCP packet
     # Create a SYN packet
@@ -298,4 +314,4 @@ def verify_adapter():
 
 
 # Main
-StartConnection(SERVER_ADDRESS, 'CoolVPN', REAL_INTERFACE)
+StartConnection(SERVER_ADDRESS, 'CoolVPN', 'MediaTek Wi-Fi 6 MT7921 Wireless LAN Card')
