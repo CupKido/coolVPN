@@ -334,10 +334,23 @@ def main():
     parser.add_argument('-i','--interface', type=str, help='the name of the interface to use')
     parser.add_argument('-a','--adapter', type=str, help='the name of the adapter to use')
     args = parser.parse_args()
+    #check if arguments are valid
+    
+    if args.server is None: 
+        print("error, insufficient arguments (server)")
+        return
+
+    if args.interface is None:
+        args.interface = conf.iface
+    if args.adapter is None:
+        args.adapter = "CoolVPN"
+
+
+
     try:
         StartConnection(args.server, args.adapter, args.interface)
     except:
-        print("error, insufficient arguments")
+        print("error, Exiting...")
 
 if __name__ == "__main__":
     main()
