@@ -8,8 +8,8 @@ from cryptography.fernet import Fernet, InvalidToken
 
 Connected_Client = {}
 used_ports = {}
-REAL_INTERFACE = conf.iface
-#REAL_INTERFACE = 'MediaTek Wi-Fi 6 MT7921 Wireless LAN Card'
+#REAL_INTERFACE = conf.iface
+REAL_INTERFACE = "Intel(R) Dual Band Wireless-AC 8260"
 INFO_PORT = 6490
 REGISTER_PORT = 6491
 SERVICE_PORT = 6492
@@ -80,7 +80,7 @@ def ProcessPackets(pkt):
                 print(data)
                 if data == "StartConnection":
                     GenerateAndSendID(pkt, data)
-            except Exception as e: 
+            except Exception as e:
                 print('Encountered an error while trying to generate and send ID')
                 print(e)
                 return
@@ -114,12 +114,15 @@ def process_and_forward(pkt, client_ip):
             client_id, client_packet = unpack_from_client(pkt)
             client_packet.display()
             print("client packet")
+
             if TCP in client_packet:
                 used_ports[client_packet[TCP].sport] = client_ip
                 client_packet[TCP].chksum = TCP().chksum
+
             elif UDP in client_packet:
                 used_ports[client_packet[UDP].sport] = client_ip
                 client_packet[UDP].chksum = UDP().chksum
+
             if Ether in client_packet:
                 client_packet = client_packet[Ether].payload
             send(client_packet, iface=REAL_INTERFACE)
@@ -169,7 +172,7 @@ def unpack_from_client(pkt):
         fernet = Fernet(symmetric_key)
         enc_data = pkt.getlayer(Raw).load
         client_id, client_packet = pickle.loads(fernet.decrypt(enc_data))
-        #client_packet[IP].src = SERVER_ADDRESS
+        client_packet[IP].src = SERVER_ADDRESS
         client_packet[IP].src = None
         client_packet[IP].chksum = None
         del client_packet[IP].chksum
