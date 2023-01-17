@@ -7,6 +7,7 @@ from scapy.layers.dns import *
 from scapy.layers.inet import *
 from scapy.layers.l2 import *
 from scapy.sendrecv import *
+import argparse
 
 SERVER_ADDRESS = '192.168.113.56'
 INFO_PORT = 6490
@@ -322,4 +323,21 @@ def verify_adapter():
 # netsh interface ipv4 set address name="CoolVPN" source=static address=IP_address mask=subnet_mask gateway=default_gateway
 
 # Main
-StartConnection(SERVER_ADDRESS, 'CoolVPN', "Intel(R) Dual Band Wireless-AC 8260")
+#StartConnection(SERVER_ADDRESS, 'CoolVPN', "Intel(R) Dual Band Wireless-AC 8260")
+
+def main(): 
+    # get arguments
+    #import argparse
+    
+    parser = argparse.ArgumentParser(description='Client for the VPN')
+    parser.add_argument('-s','--server', type=str, help='the ip of the server')
+    parser.add_argument('-i','--interface', type=str, help='the name of the interface to use')
+    parser.add_argument('-a','--adapter', type=str, help='the name of the adapter to use')
+    args = parser.parse_args()
+    try:
+        StartConnection(args.server, args.adapter, args.interface)
+    except:
+        print("error, insufficient arguments")
+
+if __name__ == "__main__":
+    main()

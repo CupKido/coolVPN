@@ -5,12 +5,14 @@ from scapy.layers.dns import *
 from scapy.sendrecv import *
 import rsa
 from cryptography.fernet import Fernet, InvalidToken
+import argparse 
 
 Connected_Client = {}
 used_ports = {}
 #REAL_INTERFACE = conf.iface
 #REAL_INTERFACE = "Intel(R) Dual Band Wireless-AC 8260"
-REAL_INTERFACE = "MediaTek Wi-Fi 6 MT7921 Wireless LAN Card"
+#REAL_INTERFACE = "MediaTek Wi-Fi 6 MT7921 Wireless LAN Card"
+REAL_INTERFACE = ''
 INFO_PORT = 6490
 REGISTER_PORT = 6491
 SERVICE_PORT = 6492
@@ -19,11 +21,14 @@ RSA_KEYS = ()
 
 #  tcp.port==6491 or tcp.port==6490  or tcp.port==6492 or ip.dst==8.8.8.8 or ip.src==8.8.8.8 or tcp.port==80
 
-def StartServer():
+def StartServer(interface):
     """
     Starts the server
     """
     global REAL_INTERFACE
+    REAL_INTERFACE = interface  
+    SERVER_ADDRESS = get_if_addr(REAL_INTERFACE)
+    print(SERVER_ADDRESS)
     confirm_keys()
 
     # sniffs the packets and sends them to be processed
@@ -87,9 +92,9 @@ def ProcessPackets(pkt):
                 return
 
         # need to add a filter so that only packets that are meant for the client are processed
-        if pkt[TCP].dport in used_ports.keys():
+        if (pkt[TCP].dport, pkt[IP].src) in used_ports.keys():
             process_to_client(pkt, pkt[TCP].dport)
-    elif UDP in pkt and pkt[UDP].dport in used_ports.keys():
+    elif UDP in pkt and (pkt[UDP].dport, pkt[IP].src) in used_ports.keys():
         process_to_client(pkt, pkt[UDP].dport)
 
     # check if pkt is a request for the server
@@ -99,10 +104,10 @@ def process_to_client(pkt, port):
     """
     encrypts the packet and sends it to the client
     """
-    client_ip = used_ports[port]
+    client_ip_outer, client_ip_inner  = used_ports[(port, pkt[IP].src)]
     print('packet from app:')
     pkt.display()
-    packet = pack_to_client(pkt, client_ip)
+    packet = pack_to_client(pkt, client_ip_outer, client_ip_inner)
     print('packed packet to client:')
     packet.display()
     send(packet, iface=REAL_INTERFACE)
@@ -115,18 +120,21 @@ def process_and_forward(pkt, client_ip):
     global SERVER_ADDRESS
     try:
         if pkt.haslayer(Raw):
-            client_id, client_packet = unpack_from_client(pkt)
+            client_id, client_packet, original_inner_id = unpack_from_client(pkt)
             client_packet.display()
             print("client packet")
-
+            sport=0
             if TCP in client_packet:
-                used_ports[client_packet[TCP].sport] = client_ip
+                sport = client_packet[TCP].sport 
                 client_packet[TCP].chksum = TCP().chksum
 
             elif UDP in client_packet:
-                used_ports[client_packet[UDP].sport] = client_ip
+                sport = client_packet[UDP].sport 
                 client_packet[UDP].chksum = UDP().chksum
-
+            dict_key = (sport, client_packet[IP].dst)
+            dict_val = (client_ip, original_inner_id)
+            used_ports[dict_key] = dict_val
+            print(str(dict_key) + ' : ' + str(dict_val))
             if Ether in client_packet:
                 client_packet = client_packet[Ether].payload
             send(client_packet, iface=REAL_INTERFACE)
@@ -140,30 +148,19 @@ def process_and_forward(pkt, client_ip):
         return
 
 
-def send_to_client(pkt, client_ip):
-    """
-    decryptes clients package, changes the source to the server's IP, and forwards it
-    """
-    symmetric_key = Connected_Client[client_ip][1]
-    raw_data = pickle.dumps(pkt)
-    fernet = Fernet(symmetric_key)
-    enc_data = fernet.encrypt(raw_data)
-    packet = IP(dst=client_ip) / TCP(dport=6494, sport=SERVICE_PORT) / Raw(enc_data)
-    packet.display()
-    send(packet, iface=REAL_INTERFACE)
-
-
-def pack_to_client(pkt, client_ip):
+def pack_to_client(pkt, client_ip_outer, client_ip_inner):
     """
     return a packet that is encrypted with the client's symmetric key, and packet
     """
     global SERVICE_PORT
-    symmetric_key = Connected_Client[client_ip][1]
-    pkt[IP].dst = client_ip
+    pkt[IP].dst = client_ip_inner
+
+    #packing the packet 
+    symmetric_key = Connected_Client[client_ip_outer][1]
     raw_data = pickle.dumps(pkt)
     fernet = Fernet(symmetric_key)
     enc_data = fernet.encrypt(raw_data)
-    packet = IP(dst=client_ip) / TCP(sport=SERVICE_PORT, dport=SERVICE_PORT) / Raw(enc_data)
+    packet = IP(dst=client_ip_outer) / TCP(sport=SERVICE_PORT, dport=SERVICE_PORT) / Raw(enc_data)
     return packet
 
 
@@ -176,6 +173,7 @@ def unpack_from_client(pkt):
         fernet = Fernet(symmetric_key)
         enc_data = pkt.getlayer(Raw).load
         client_id, client_packet = pickle.loads(fernet.decrypt(enc_data))
+        original_ip = client_packet[IP].src
         client_packet[IP].src = SERVER_ADDRESS
         client_packet[IP].src = None
         client_packet[IP].chksum = None
@@ -192,7 +190,7 @@ def unpack_from_client(pkt):
         
         #client_packet[TCP].sport = 45
         #client_packet = Ether() / client_packet
-        return client_id, client_packet
+        return client_id, client_packet, original_ip
 
 
 def send_public_key(pkt):
@@ -325,6 +323,17 @@ def get_raw_AESencrypted_of(ID, data):
 def get_raw_of(data): return Raw(pickle.dumps(data))
 
 
-print(SERVER_ADDRESS)
-# Main
-StartServer()
+
+
+def main():
+    #get interface argument with argparser
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-i", "--interface", help="interface to listen on")
+    args = parser.parse_args()
+    interface = args.interface
+    if interface is None:
+        interface = conf.iface
+    StartServer(interface)
+
+if __name__ == "__main__":
+    main()
