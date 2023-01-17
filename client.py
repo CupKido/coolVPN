@@ -51,7 +51,8 @@ def StartConnection(ServerIP, adapter_interface, real_interface):
             time.sleep(DISCONNECTED_WAIT_TIME)
     t = threading.Thread(target=listen_from_server, args=())
     t.start()
-    TryHTTP()
+    # TryHTTP()
+    print("listening from adapter")
     listen_from_adapter(USED_INTERFACE)
 
 
@@ -71,8 +72,7 @@ def listen_from_adapter(interface):
     """
     listen to packets that are on the vpn's interface
     """
-    sniff(iface=interface, prn=ProcessPackets,
-          lfilter=lambda x: (IP in x and x[IP].src == get_if_addr(REAL_INTERFACE_IP)) or ARP in x)
+    sniff(iface=interface, prn=ProcessPackets)
     return
 
 
@@ -96,6 +96,9 @@ def ProcessPackets(pkt):
     """
     encrypts the packet with the symmetric key and sends it to the server
     """
+    print(get_if_addr(USED_INTERFACE))
+    if not (IP in pkt and pkt[IP].src == "169.254.63.38") or ARP in pkt:
+        return
     if ARP in pkt:
         respond_to_arp(pkt)
         return
@@ -323,7 +326,7 @@ def verify_adapter():
 # netsh interface ipv4 set address name="CoolVPN" source=static address=IP_address mask=subnet_mask gateway=default_gateway
 
 # Main
-#StartConnection(SERVER_ADDRESS, 'CoolVPN', "Intel(R) Dual Band Wireless-AC 8260")
+StartConnection(SERVER_ADDRESS, 'CoolVPN', "Intel(R) Dual Band Wireless-AC 8260")
 
 def main(): 
     # get arguments
@@ -353,4 +356,5 @@ def main():
         print("error, Exiting...")
 
 if __name__ == "__main__":
-    main()
+    pass
+    # main()
