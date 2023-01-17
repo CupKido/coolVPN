@@ -233,6 +233,7 @@ def send_public_key(pkt):
     if pkt.haslayer(TCP):
         packet = IP(dst=pkt[IP].src) / TCP(dport=pkt[TCP].sport, sport=INFO_PORT) / get_raw_of(raw_data)
         print("sending public key to client")
+        packet.display()
         send(packet, iface=REAL_INTERFACE)
 
 
