@@ -9,7 +9,8 @@ from cryptography.fernet import Fernet, InvalidToken
 Connected_Client = {}
 used_ports = {}
 #REAL_INTERFACE = conf.iface
-REAL_INTERFACE = "Intel(R) Dual Band Wireless-AC 8260"
+#REAL_INTERFACE = "Intel(R) Dual Band Wireless-AC 8260"
+REAL_INTERFACE = "MediaTek Wi-Fi 6 MT7921 Wireless LAN Card"
 INFO_PORT = 6490
 REGISTER_PORT = 6491
 SERVICE_PORT = 6492
@@ -99,7 +100,10 @@ def process_to_client(pkt, port):
     encrypts the packet and sends it to the client
     """
     client_ip = used_ports[port]
+    print('packet from app:')
+    pkt.display()
     packet = pack_to_client(pkt, client_ip)
+    print('packed packet to client:')
     packet.display()
     send(packet, iface=REAL_INTERFACE)
 
