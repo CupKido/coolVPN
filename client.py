@@ -8,7 +8,7 @@ from scapy.layers.inet import *
 from scapy.layers.l2 import *
 from scapy.sendrecv import *
 
-SERVER_ADDRESS = '192.168.113.241'
+SERVER_ADDRESS = '192.168.113.56'
 INFO_PORT = 6490
 REGISTER_PORT = 6491
 SERVICE_PORT = 6492
@@ -32,8 +32,8 @@ def StartConnection(ServerIP, adapter_interface, real_interface):
     REAL_INTERFACE_IP = get_if_addr(REAL_INTERFACE)
     USED_INTERFACE = adapter_interface
     SERVER_ADDRESS = ServerIP
-    ip = get_if_addr(conf.iface)
-    print(ip)
+
+    print(REAL_INTERFACE_IP)
     confirm_keys()
     verify_adapter()
     #listen_from_adapter(USED_INTERFACE)
@@ -71,13 +71,13 @@ def listen_from_adapter(interface):
     listen to packets that are on the vpn's interface
     """
     sniff(iface=interface, prn=ProcessPackets,
-          lfilter=lambda x: (IP in x and x[IP].src == get_if_addr(conf.iface)) or ARP in x)
+          lfilter=lambda x: (IP in x and x[IP].src == get_if_addr(REAL_INTERFACE_IP)) or ARP in x)
     return
 
 
 def listen_from_server():
     global SERVER_ADDRESS, SERVICE_PORT
-    sniff(iface=conf.iface, prn=get_from_server, lfilter=get_server_response_lambda(SERVICE_PORT))
+    sniff(iface=REAL_INTERFACE, prn=get_from_server, lfilter=get_server_response_lambda(SERVICE_PORT))
 
 
 def get_from_server(pkt):
@@ -313,5 +313,13 @@ def verify_adapter():
     subprocess.run(['tapctl', 'create', '--name', 'CoolVPN'])
 
 
+# will probably want to run this command, or get something similar, more dynamic
+# route add 0.0.0.0 mask 0.0.0.0 169.254.63.1 metric 1
+
+# route delete 0.0.0.0 <default gateway>
+# ex: route delete 0.0.0.0 10.7.15.254
+
+# netsh interface ipv4 set address name="CoolVPN" source=static address=IP_address mask=subnet_mask gateway=default_gateway
+
 # Main
-StartConnection(SERVER_ADDRESS, 'CoolVPN', 'MediaTek Wi-Fi 6 MT7921 Wireless LAN Card')
+StartConnection(SERVER_ADDRESS, 'CoolVPN', "Intel(R) Dual Band Wireless-AC 8260")
