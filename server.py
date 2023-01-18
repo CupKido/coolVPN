@@ -88,13 +88,13 @@ def service_port_socket_handler(connection, address):
     pack_enc = connection.recv(2048)
     fernet = Fernet(Connected_Client[address[0]][1])
 
-    client_id, packet = pickle.loads(fernet.decrypt(pack_enc))
+    client_id, client_packet = pickle.loads(fernet.decrypt(pack_enc))
     if client_id != Connected_Client[address[0]][0]:
         print("client id does not match data") 
         return
-    packet.display()
-    original_inner_id = packet[IP].id
-
+    client_packet.display()
+    original_inner_id = client_packet[IP].id
+    client_packet[IP].id = None
 
 
     sport=0
