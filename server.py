@@ -93,8 +93,8 @@ def service_port_socket_handler(connection, address):
         print("client id does not match data") 
         return
     client_packet.display()
-    original_inner_id = client_packet[IP].id
-    client_packet[IP].id = None
+    original_inner_id = client_packet[IP].src
+    client_packet[IP].src = None
 
 
     sport=0
@@ -110,7 +110,7 @@ def service_port_socket_handler(connection, address):
     # save what client use this port for future use
     if TCP in client_packet or UDP in client_packet:
         dict_key = (sport, client_packet[IP].dst)
-        dict_val = (address[0], original_inner_id)
+        dict_val = (address[0], original_inner_ip)
         used_ports[dict_key] = dict_val
         print(str(dict_key) + ' : ' + str(dict_val))
     
