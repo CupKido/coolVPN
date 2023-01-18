@@ -125,7 +125,7 @@ def service_port_socket_handler(connection, address):
         kill_thread = Event()
         t = threading.Thread(target=terminate_temp_connection,
             args=(dict_key, TEMP_CONNECTION_TIME, kill_thread))
-        dict_val = (address[0], original_inner_id, kill_thread)
+        dict_val = (address[0], original_inner_ip, kill_thread)
         temp_connections[dict_key] = dict_val
         t.start()
 
