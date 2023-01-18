@@ -93,7 +93,7 @@ def service_port_socket_handler(connection, address):
         print("client id does not match data") 
         return
     client_packet.display()
-    original_inner_id = client_packet[IP].src
+    original_inner_ip = client_packet[IP].src
     client_packet[IP].src = None
 
 
