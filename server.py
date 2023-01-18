@@ -24,6 +24,7 @@ REGISTER_PORT = 6491
 SERVICE_PORT = 6492
 SERVER_ADDRESS = get_if_addr(REAL_INTERFACE)
 RSA_KEYS = ()
+TEMP_CONNECTION_TIME = 10
 
 #  tcp.port==6491 or tcp.port==6490  or tcp.port==6492 or ip.dst==8.8.8.8 or ip.src==8.8.8.8 or tcp.port==80
 
@@ -72,9 +73,9 @@ def ProcessPackets(pkt):
     """
     global RSA_KEYS, SERVER_ADDRESS
     if not (pkt.haslayer(IP) and (pkt[IP].dst == '127.0.0.1' or pkt[IP].dst == SERVER_ADDRESS)):
-        if pkt.haslayer(TCP) and pkt[TCP].dport == 22 or pkt[TCP].sport == 22:
-            return
-        pkt.display()
+        #if pkt.haslayer(TCP) and pkt[TCP].dport == 22 or pkt[TCP].sport == 22:
+        #    return
+        #pkt.display()
         return
     if TCP in pkt:
         if pkt[TCP].dport == SERVICE_PORT or UDP in pkt and pkt[UDP].dport == SERVICE_PORT:
@@ -110,8 +111,6 @@ def ProcessPackets(pkt):
     elif ICMP in pkt and pkt[IP].src in temp_connections.keys():
         process_to_client(pkt, 0)
 
-    # check if pkt is a request for the server
-
 
 def process_to_client(pkt, port):
     """
@@ -133,8 +132,7 @@ def process_and_forward(pkt, client_ip):
     """
     decryptes clients package, changes the source to the server's IP, and forwards it
     """
-    
-    global SERVER_ADDRESS
+    global SERVER_ADDRESS, TEMP_CONNECTION_TIME
     try:
         if pkt.haslayer(Raw):
             client_id, client_packet, original_inner_id = unpack_from_client(pkt)
@@ -149,6 +147,8 @@ def process_and_forward(pkt, client_ip):
                 sport = client_packet[UDP].sport 
                 client_packet[UDP].chksum = UDP().chksum
             
+
+            # save what client use this port for future use
             if TCP in client_packet or UDP in client_packet:
                 dict_key = (sport, client_packet[IP].dst)
                 dict_val = (client_ip, original_inner_id)
@@ -162,9 +162,10 @@ def process_and_forward(pkt, client_ip):
                 if dict_key in temp_connections.keys():
                     temp_connections[dict_key][2].set()
                     temp_connections.pop(dict_key)
-
+                # create a new connection for 10 seconds
                 kill_thread = Event()
-                t = threading.Thread(target=terminate_temp_connection, args=(dict_key, 10, kill_thread))
+                t = threading.Thread(target=terminate_temp_connection,
+                 args=(dict_key, TEMP_CONNECTION_TIME, kill_thread))
                 dict_val = (client_ip, original_inner_id, kill_thread)
                 temp_connections[dict_key] = dict_val
                 t.start()
@@ -199,16 +200,24 @@ def pack_to_client(pkt, client_ip_outer, client_ip_inner):
 
 
 def unpack_from_client(pkt):
+    '''
+    decrypts the packet's payload, load it to a package,
+    change the source to the server's IP
+    return's which client sent the packet, the packet, and the original inner IP (of the client)
+    '''
     if IP not in pkt:
         return
     client_ip = pkt[IP].src
     if pkt.haslayer(Raw):
+        #packet's extraction
         symmetric_key = Connected_Client[client_ip][1]
         fernet = Fernet(symmetric_key)
         enc_data = pkt.getlayer(Raw).load
         client_id, client_packet = pickle.loads(fernet.decrypt(enc_data))
         original_ip = client_packet[IP].src
-        client_packet[IP].src = SERVER_ADDRESS
+        #client_packet[IP].src = SERVER_ADDRESS
+
+        # change the source to the server's IP, and all relevant parameters
         client_packet[IP].src = None
         client_packet[IP].chksum = None
         del client_packet[IP].chksum
@@ -224,8 +233,7 @@ def unpack_from_client(pkt):
             client_packet[ICMP].chksum = None
             del client_packet[ICMP].chksum
         
-        #client_packet[TCP].sport = 45
-        #client_packet = Ether() / client_packet
+
         return client_id, client_packet, original_ip
 
 
@@ -244,7 +252,8 @@ def send_public_key(pkt):
 
 def GenerateAndSendID(original_pkt, data):
     """
-    Generates an ID, and asymetric key and sends it encrypted with the client's public key
+    Generates an ID, and asymetric key and sends it encrypted with the client's public key,
+    then waits for confirmation and registers the client with its symmetric key
     """
     global REGISTER_PORT, REAL_INTERFACE
     print('Start Connection Received')
