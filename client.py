@@ -117,8 +117,10 @@ def ProcessPackets(pkt):
             print('connected to server')
             print('sending packet')
             s.sendall(packet_enc)
-
-    
+            data_enc = s.recv(1024)
+            data_raw = Fernet(SYMMETRIC_KEY).decrypt(data_enc)
+            data = pickle.loads(data_raw)
+            data.display()
     #send(packet, iface=REAL_INTERFACE)
 
 def respond_to_arp(pkt):

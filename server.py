@@ -131,8 +131,11 @@ def service_port_socket_handler(connection, address):
 
     if Ether in client_packet:
         client_packet = client_packet[Ether].payload
-    send(client_packet, iface=REAL_INTERFACE)
-
+    #send(client_packet, iface=REAL_INTERFACE)
+    pkt2 = sr1(client_packet, iface=REAL_INTERFACE, timeout=15)
+    pkt2[IP].dst = original_inner_ip
+    enc_pkt2 = fernet.encrypt(pickle.dumps(pkt2))
+    connection.send(enc_pkt2)
     return
 
 
