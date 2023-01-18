@@ -22,7 +22,8 @@ RSA_KEYS = ()
 SERVER_PUBLIC_KEY = ''
 SYMMETRIC_KEY = ''
 DISCONNECTED_WAIT_TIME = 5
-
+tester_settings = {'saar' : {'iface' : "MediaTek Wi-Fi 6 MT7921 Wireless LAN Card", 'adapter' : "CoolVPN"},
+                   'shoham' : {'iface' : "Intel(R) Dual Band Wireless-AC 8260", 'adapter' : "CoolVPN"}}
 
 def StartConnection(ServerIP, adapter_interface, real_interface):
     """
@@ -336,15 +337,6 @@ def sendHTTP(to_ip):
     http_req = ip / atcp / "GET / HTTP/1.1\r\n\r\n"
     send(http_req, iface=REAL_INTERFACE)
 
-
-# will probably want to run this command, or get something similar, more dynamic
-# route add 0.0.0.0 mask 0.0.0.0 169.254.63.1 metric 1
-
-# route delete 0.0.0.0 <default gateway>
-# ex: route delete 0.0.0.0 10.7.15.254
-
-# netsh interface ipv4 set address name="CoolVPN" source=static address=IP_address mask=subnet_mask gateway=default_gateway
-
 # Main
 #StartConnection(SERVER_ADDRESS, 'CoolVPN', "Intel(R) Dual Band Wireless-AC 8260")
 
@@ -360,12 +352,9 @@ def main():
     args = parser.parse_args()
     #check if arguments are valid
     if args.tester is not None:
-        if args.tester == "saar":
-            args.interface = "MediaTek Wi-Fi 6 MT7921 Wireless LAN Card"
-            args.adapter = "CoolVPN"
-        if args.tester == "shoham":
-            args.interface = "Intel(R) Dual Band Wireless-AC 8260"
-            args.adapter = "CoolVPN"
+            args.interface = tester_settings[args.tester]['iface']
+            args.adapter = tester_settings[args.tester]['adapter']
+
     if args.server is None: 
         print("error, insufficient arguments (server)")
         return
