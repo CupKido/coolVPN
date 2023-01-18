@@ -381,7 +381,12 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("-i", "--interface", help="interface to listen on")
     parser.add_argument("-t", "--tester", help="which tester's settings to use")
+    parser.add_argument("-pi", "--print_interfaces", help="prints all interfaces", action="store_true")
     args = parser.parse_args()
+    #if -pi was given, print all interfaces and exit
+    if args.print_interfaces:
+        print(conf.route)
+        return
     if args.tester is None:
         interface = args.interface
         if interface is None:

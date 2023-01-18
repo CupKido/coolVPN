@@ -349,7 +349,14 @@ def main():
     parser.add_argument('-i','--interface', type=str, help='the name of the interface to use')
     parser.add_argument('-a','--adapter', type=str, help='the name of the adapter to use')
     parser.add_argument('-t','--tester', type=str, help='the name of the tester to use')
+    parser.add_argument("-pi", "--print_interfaces", help="prints all interfaces", action="store_true")
     args = parser.parse_args()
+
+    #if -pi was given, print all interfaces and exit
+    if args.print_interfaces:
+        print(conf.route)
+        return
+
     #check if arguments are valid
     if args.tester is not None:
             args.interface = tester_settings[args.tester]['iface']
