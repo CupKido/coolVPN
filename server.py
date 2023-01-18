@@ -72,6 +72,7 @@ def ProcessPackets(pkt):
     """
     global RSA_KEYS, SERVER_ADDRESS
     if not (pkt.haslayer(IP) and (pkt[IP].dst == '127.0.0.1' or pkt[IP].dst == SERVER_ADDRESS)):
+        pkt.display()
         return
     if TCP in pkt:
         if pkt[TCP].dport == SERVICE_PORT or UDP in pkt and pkt[UDP].dport == SERVICE_PORT:
