@@ -40,6 +40,8 @@ def StartConnection(ServerIP, adapter_interface, real_interface):
     #listen_from_adapter(USED_INTERFACE)
     print(REAL_INTERFACE)
     id_received = False
+
+    
     while not id_received:
         try:
             id_received = get_id_from_server(ServerIP)
@@ -123,8 +125,9 @@ def get_id_from_server(ServerIP):
     """
     global REAL_INTERFACE, REGISTER_PORT, RSA_KEYS, SERVER_PUBLIC_KEY, SYMMETRIC_KEY
     # getting the public key
-    if not get_public_key(ServerIP):
-        return False
+    if SERVER_PUBLIC_KEY == '':
+        if not get_public_key(ServerIP):
+            return False
     # creating the start connection packet
     begin_packet = IP(dst=ServerIP) / TCP(sport=REGISTER_PORT, dport=REGISTER_PORT) / \
                    get_raw_RSAencrypted_of("StartConnection", SERVER_PUBLIC_KEY)
@@ -198,13 +201,13 @@ def get_public_key(ServerIP):
     """
     global SERVER_PORT, REAL_INTERFACE, SERVER_PUBLIC_KEY
     my_ip = get_if_addr(conf.iface)
-    sniffer = AsyncSniffer(iface=REAL_INTERFACE, lfilter=get_server_response_lambda(INFO_PORT), count=1, timeout=5)
+    sniffer = AsyncSniffer(iface=REAL_INTERFACE, lfilter=get_server_response_lambda(INFO_PORT), count=1, timeout=10)
     sniffer.start()
-    packet = IP(dst=ServerIP) / TCP(dport=INFO_PORT, sport=INFO_PORT) / Raw(b'Get Public Key')
+    packet = IP(dst=ServerIP) / TCP(dport=INFO_PORT, sport=INFO_PORT, flags='S') / Raw(b'Get Public Key')
     # packet.display()
     print("sending get public key packet")
     send(packet, iface=REAL_INTERFACE)
-    send(packet, iface=REAL_INTERFACE)
+    #send(packet, iface=REAL_INTERFACE)
     sniffer.join()
     if len(sniffer.results) == 0:
         print("no response")
@@ -215,6 +218,10 @@ def get_public_key(ServerIP):
     if newp.haslayer(Raw):
         SERVER_PUBLIC_KEY = pickle.loads(newp.getlayer(Raw).load)
         return SERVER_PUBLIC_KEY
+    else:
+        print("no response data")
+        print(newp[TCP].flags)
+        return False
 
 
 def pack_to_server(pkt):
@@ -256,8 +263,9 @@ def TryHTTP():
     # Create a TCP packet
     # Create a SYN packet
     tcp = TCP(dport=80, flags='S')
-    # Create an HTTP request packet
-    http_req = "GET / HTTP/1.1\r\n\r\n"
+    # Create an HTTP request packet4
+    atcp = TCP(dport=80)
+    http_req = ip / atcp / "GET / HTTP/1.1\r\n\r\n"
 
     # Combine the IP and TCP packets with the HTTP request packet
     pkt = ip / tcp
@@ -299,7 +307,7 @@ def confirm_keys():
     """
     Checks if the client has a key pair, if not, generates a new one.
     """
-    global RSA_KEYS
+    global RSA_KEYS, SERVER_PUBLIC_KEY
     try:
         with open('client_keys.bin', 'rb') as f:
             key_set = pickle.loads(f.read())
@@ -309,12 +317,24 @@ def confirm_keys():
         with open('client_keys.bin', 'wb') as f:
             f.write(pickle.dumps(key_set))
         print("keys generated.")
+    try:
+        with open('server_public_key.bin', 'rb') as f:
+            SERVER_PUBLIC_KEY = pickle.loads(f.read())
+    except FileNotFoundError:
+        print("no server public key")
     RSA_KEYS = key_set
 
 
 def verify_adapter():
     # Check whether the adapter exists
     subprocess.run(['tapctl', 'create', '--name', 'CoolVPN'])
+
+def sendHTTP(to_ip):
+    ip = IP(dst=to_ip, id=1234)
+    tcp = TCP(dport=80, flags='S')
+    atcp = TCP(dport=80)
+    http_req = ip / atcp / "GET / HTTP/1.1\r\n\r\n"
+    send(http_req, iface=REAL_INTERFACE)
 
 
 # will probably want to run this command, or get something similar, more dynamic
@@ -326,7 +346,7 @@ def verify_adapter():
 # netsh interface ipv4 set address name="CoolVPN" source=static address=IP_address mask=subnet_mask gateway=default_gateway
 
 # Main
-StartConnection(SERVER_ADDRESS, 'CoolVPN', "Intel(R) Dual Band Wireless-AC 8260")
+#StartConnection(SERVER_ADDRESS, 'CoolVPN', "Intel(R) Dual Band Wireless-AC 8260")
 
 def main(): 
     # get arguments
@@ -336,9 +356,16 @@ def main():
     parser.add_argument('-s','--server', type=str, help='the ip of the server')
     parser.add_argument('-i','--interface', type=str, help='the name of the interface to use')
     parser.add_argument('-a','--adapter', type=str, help='the name of the adapter to use')
+    parser.add_argument('-t','--tester', type=str, help='the name of the tester to use')
     args = parser.parse_args()
     #check if arguments are valid
-    
+    if args.tester is not None:
+        if args.tester == "saar":
+            args.interface = "MediaTek Wi-Fi 6 MT7921 Wireless LAN Card"
+            args.adapter = "CoolVPN"
+        if args.tester == "shoham":
+            args.interface = "Intel(R) Dual Band Wireless-AC 8260"
+            args.adapter = "CoolVPN"
     if args.server is None: 
         print("error, insufficient arguments (server)")
         return
@@ -356,5 +383,5 @@ def main():
         print("error, Exiting...")
 
 if __name__ == "__main__":
+    main()
     pass
-    # main()

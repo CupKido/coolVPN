@@ -57,6 +57,8 @@ def confirm_keys():
         with open('server_keys.bin', 'wb') as f:
             f.write(pickle.dumps(key_set))
         print("keys generated.")
+    with open('server_public_key.bin', 'wb') as f:
+        f.write(pickle.dumps(key_set[0]))
     RSA_KEYS = key_set
 
 
