@@ -72,7 +72,7 @@ def ProcessPackets(pkt):
     """
     global RSA_KEYS, SERVER_ADDRESS
     if not (pkt.haslayer(IP) and (pkt[IP].dst == '127.0.0.1' or pkt[IP].dst == SERVER_ADDRESS)):
-        if pkt.haslayer(TCP) and pkt[TCP].dport == 22:
+        if pkt.haslayer(TCP) and pkt[TCP].dport == 22 or pkt[TCP].sport == 22:
             return
         pkt.display()
         return
