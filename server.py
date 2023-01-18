@@ -40,7 +40,17 @@ def StartServer(interface):
 
     # sniffs the packets and sends them to be processed
     print('listening to ' + str(REAL_INTERFACE))
-    sniff(iface=REAL_INTERFACE, prn=ProcessPackets)
+    info_thread = threading.Thread(target=start_info_port_socket)
+    register_thread = threading.Thread(target=start_register_port_socket)
+    service_thread = threading.Thread(target=start_service_port_socket)
+    info_thread.start()
+    time.sleep(0.5)
+    register_thread.start()
+    time.sleep(0.5)
+    service_thread.start()
+
+    info_thread.join()
+    #sniff(iface=REAL_INTERFACE, prn=ProcessPackets)
     return
 
 
@@ -61,6 +71,143 @@ def confirm_keys():
     with open('server_public_key.bin', 'wb') as f:
         f.write(pickle.dumps(key_set[0]))
     RSA_KEYS = key_set
+
+def start_service_port_socket():
+    global SERVICE_PORT
+    register_port_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    register_port_socket.bind(('0.0.0.0', SERVICE_PORT))
+    register_port_socket.listen(6)
+    print("service port socket started")
+    while True:
+        connection, address = register_port_socket.accept()
+        thread = threading.Thread(target=service_port_socket_handler , args=(connection, address))
+        thread.start()
+
+def service_port_socket_handler(connection, address):
+    print("new connection from: " + str(address) + " on service port")
+    pack_enc = connection.recv(2048)
+    fernet = Fernet(Connected_Client[address[0]][1])
+
+    client_id, packet = pickle.loads(fernet.decrypt(pack_enc))
+    if client_id != Connected_Client[address[0]][0]:
+        print("client id does not match data") 
+        return
+    packet.display()
+    original_inner_id = packet[IP].id
+
+
+
+    sport=0
+    if TCP in client_packet:
+        sport = client_packet[TCP].sport 
+        client_packet[TCP].chksum = TCP().chksum
+
+    elif UDP in client_packet:
+        sport = client_packet[UDP].sport 
+        client_packet[UDP].chksum = UDP().chksum
+    
+
+    # save what client use this port for future use
+    if TCP in client_packet or UDP in client_packet:
+        dict_key = (sport, client_packet[IP].dst)
+        dict_val = (address[0], original_inner_id)
+        used_ports[dict_key] = dict_val
+        print(str(dict_key) + ' : ' + str(dict_val))
+    
+    if ICMP in client_packet:
+        dict_key = client_packet[IP].dst
+
+        # if the client already exists, terminate the old thread
+        if dict_key in temp_connections.keys():
+            temp_connections[dict_key][2].set()
+            temp_connections.pop(dict_key)
+        # create a new connection for 10 seconds
+        kill_thread = Event()
+        t = threading.Thread(target=terminate_temp_connection,
+            args=(dict_key, TEMP_CONNECTION_TIME, kill_thread))
+        dict_val = (address[0], original_inner_id, kill_thread)
+        temp_connections[dict_key] = dict_val
+        t.start()
+
+    if Ether in client_packet:
+        client_packet = client_packet[Ether].payload
+    send(client_packet, iface=REAL_INTERFACE)
+
+    return
+
+
+
+def start_register_port_socket():
+    """
+    Starts a socket that listens to the register port
+    """
+    global REGISTER_PORT
+    register_port_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    register_port_socket.bind(('0.0.0.0', REGISTER_PORT))
+    register_port_socket.listen(6)
+    print("register port socket started")
+    while True:
+        connection, address = register_port_socket.accept()
+        thread = threading.Thread(target=register_port_socket_handler , args=(connection, address))
+        thread.start()
+        
+
+
+def register_port_socket_handler(connection, address):
+    global RSA_KEYS, SERVER_ADDRESS
+    print("new connection from: " + str(address) + " on register port")
+    data_enc = connection.recv(1024)
+    data = pickle.loads(rsa.decrypt(data_enc, RSA_KEYS[1]))
+    if data != 'StartConnection':
+        return
+    client_public_key = pickle.loads(rsa.decrypt(connection.recv(1024), RSA_KEYS[1]))
+    if str(client_public_key) == '':
+        return
+    new_client_data = (GenerateID(), GenerateSymmetric())
+    connection.sendall(rsa.encrypt(pickle.dumps(new_client_data[0]), client_public_key))
+    bytes_packet = pickle.dumps(new_client_data[1])
+
+    third = int(len(bytes_packet) / 3)
+    parts = (bytes_packet[:third], bytes_packet[third:2 * third], bytes_packet[2 * third:])
+
+    connection.sendall(rsa.encrypt(parts[0], client_public_key))
+    time.sleep(0.4)
+    connection.sendall(rsa.encrypt(parts[1], client_public_key))
+    time.sleep(0.4)
+    connection.sendall(rsa.encrypt(parts[2], client_public_key))
+    confirmation_enc = connection.recv(1024)
+    confirmation = pickle.loads(rsa.decrypt(confirmation_enc, RSA_KEYS[1]))
+    print(str(confirmation) + ' ? ' + str(new_client_data[0]))
+    if confirmation == new_client_data[0]:
+        Connected_Client[address[0]] = (new_client_data[0], new_client_data[1], '')
+        print("new client connected and confirmed: " + str(address))
+    else:
+        print("new client connection failed: " + str(address))
+    
+
+
+
+
+
+def start_info_port_socket():
+    global INFO_PORT
+    info_port_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    info_port_socket.bind(('0.0.0.0', INFO_PORT))
+    info_port_socket.listen(6)
+    print("info port socket started")
+    while True:
+        connection, address = info_port_socket.accept()
+        thread = threading.Thread(target=info_port_socket_handler , args=(connection, address))
+        thread.start()
+
+def info_port_socket_handler(connection, address):
+    global RSA_KEYS
+    print("new connection from: " + str(address) + " on info port")
+    if connection.recv(1024) == b"Get Public Key":
+        print("new connection from: " + str(address))
+        connection.sendall(pickle.dumps(RSA_KEYS[0]))
+        print("sent public key to: " + str(address))
+    connection.close()
 
 
 def ProcessPackets(pkt):
@@ -85,11 +232,6 @@ def ProcessPackets(pkt):
                 process_and_forward(pkt, pkt[IP].src)
                 return
             # check if packet has content
-        if pkt[TCP].dport == INFO_PORT or UDP in pkt and pkt[UDP].dport == INFO_PORT:
-            if pkt.haslayer(Raw):
-                # check if packet is a request for public key
-                if pkt.getlayer(Raw).load == b'Get Public Key':
-                    send_public_key(pkt)
         if pkt[TCP].dport == REGISTER_PORT or UDP in pkt and pkt[UDP].dport == REGISTER_PORT:
             # check if packet is a request for a connection
             raw_data = pkt.getlayer(Raw).load
@@ -237,19 +379,6 @@ def unpack_from_client(pkt):
         return client_id, client_packet, original_ip
 
 
-def send_public_key(pkt):
-    """
-    sends the public key to the packet's source
-    """
-    global RSA_KEYS
-    raw_data = RSA_KEYS[0]
-    if pkt.haslayer(TCP):
-        packet = IP(dst=pkt[IP].src) / TCP(dport=pkt[TCP].sport, sport=INFO_PORT, flags=0) / get_raw_of(raw_data)
-        print("sending public key to client")
-        #packet.display()
-        #send(packet, iface=REAL_INTERFACE)
-
-
 def GenerateAndSendID(original_pkt, data):
     """
     Generates an ID, and asymetric key and sends it encrypted with the client's public key,
@@ -376,6 +505,10 @@ def terminate_temp_connection(dst_ip, sleep_time, event):
     print("terminating connection")
     temp_connections.pop(dst_ip)
 
+
+
+        
+
 def main():
     #get interface argument with argparser
     parser = argparse.ArgumentParser()
@@ -383,6 +516,7 @@ def main():
     parser.add_argument("-t", "--tester", help="which tester's settings to use")
     parser.add_argument("-pi", "--print_interfaces", help="prints all interfaces", action="store_true")
     args = parser.parse_args()
+    #args.tester = 'saar'
     #if -pi was given, print all interfaces and exit
     if args.print_interfaces:
         print(conf.route)

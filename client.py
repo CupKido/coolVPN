@@ -29,7 +29,7 @@ def StartConnection(ServerIP, adapter_interface, real_interface):
     """
     Starts the connection with the server, and listens to packets
     """
-    global REAL_INTERFACE, REAL_INTERFACE_IP, USED_INTERFACE, SERVER_ADDRESS
+    global REAL_INTERFACE, REAL_INTERFACE_IP, USED_INTERFACE, SERVER_ADDRESS, SERVER_PUBLIC_KEY
     REAL_INTERFACE = real_interface
     REAL_INTERFACE_IP = get_if_addr(REAL_INTERFACE)
     USED_INTERFACE = adapter_interface
@@ -52,9 +52,9 @@ def StartConnection(ServerIP, adapter_interface, real_interface):
         except:
             print("ERROR, retrying in " + str(DISCONNECTED_WAIT_TIME) + " seconds")
             time.sleep(DISCONNECTED_WAIT_TIME)
-    t = threading.Thread(target=listen_from_server, args=())
-    t.start()
-    # TryHTTP()
+    #t = threading.Thread(target=listen_from_server, args=())
+    #t.start()
+    TryHTTP()
     print("listening from adapter")
     listen_from_adapter(USED_INTERFACE)
 
@@ -99,15 +99,27 @@ def ProcessPackets(pkt):
     """
     encrypts the packet with the symmetric key and sends it to the server
     """
+    global SERVER_ADDRESS, SERVICE_PORT
     print(get_if_addr(USED_INTERFACE))
-    if not (IP in pkt and pkt[IP].src == "169.254.63.38") or ARP in pkt:
+    if not (IP in pkt and (pkt[IP].src == get_if_addr(USED_INTERFACE) or pkt[IP].src == '127.0.0.1')) or ARP in pkt:
+        print('not sending packet')
+        pkt.display()
         return
     if ARP in pkt:
         respond_to_arp(pkt)
         return
-    packet = pack_to_server(pkt)
     pkt.display()
-    send(packet, iface=REAL_INTERFACE)
+
+    packet_enc = pack_to_server(pkt)
+    # start connection with server
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.connect((SERVER_ADDRESS, SERVICE_PORT))
+            print('connected to server')
+            print('sending packet')
+            s.sendall(packet_enc)
+
+    
+    #send(packet, iface=REAL_INTERFACE)
 
 def respond_to_arp(pkt):
     """
@@ -124,69 +136,41 @@ def get_id_from_server(ServerIP):
     """
     Sends a request for an ID and a symmetric key to the server, and waits for a response
     """
-    global REAL_INTERFACE, REGISTER_PORT, RSA_KEYS, SERVER_PUBLIC_KEY, SYMMETRIC_KEY
+    global REAL_INTERFACE, REGISTER_PORT, RSA_KEYS, SERVER_PUBLIC_KEY, SYMMETRIC_KEY, MY_ID
     # getting the public key
     if SERVER_PUBLIC_KEY == '':
         if not get_public_key(ServerIP):
             return False
     # creating the start connection packet
-    begin_packet = IP(dst=ServerIP) / TCP(sport=REGISTER_PORT, dport=REGISTER_PORT) / \
-                   get_raw_RSAencrypted_of("StartConnection", SERVER_PUBLIC_KEY)
-    # creating the client's public key packet
-    key_packet = IP(dst=ServerIP) / TCP(sport=REGISTER_PORT, dport=REGISTER_PORT) / \
-                 get_raw_RSAencrypted_of(RSA_KEYS[0], SERVER_PUBLIC_KEY)
-    # creates a sniffer that listens to packets from the server
-    # the sniffer will listen to 4 packets, the first one is the ID, the next 3 are the symmetric key
-    sniffer = AsyncSniffer(iface=REAL_INTERFACE, lfilter=get_server_response_lambda(REGISTER_PORT), count=4)
-    sniffer.start()
-    # send start connection packet
-    # begin_packet.display()
-    print("sending start connection packet")
-    send(begin_packet, iface=REAL_INTERFACE)
-    print("waiting")
-    # wait to make sure server gets start connection packet first
-    time.sleep(0.4)
-    # send public key packet
-    # key_packet.display()
-    print("sending key packet")
-    send(key_packet, iface=REAL_INTERFACE)
-    sniffer.join()
-    # check if the server responded with the ID and the symmetric key (4 packets)
-    if len(sniffer.results) < 4:
-        print("no response")
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.connect((ServerIP, REGISTER_PORT))
+            print("requesting id")
+            print('Sending start connection')
+            StartConnection_enc = rsa.encrypt(pickle.dumps("StartConnection"), SERVER_PUBLIC_KEY)
+            s.sendall(StartConnection_enc)
+            time.sleep(0.4)
+            print('Sending public key')
+            public_key_enc = rsa.encrypt(pickle.dumps(RSA_KEYS[0]), SERVER_PUBLIC_KEY)
+            s.sendall(public_key_enc)
+            id_enc = s.recv(1024)
+            new_id = pickle.loads(rsa.decrypt(id_enc, RSA_KEYS[1]))
+            time.sleep(0.2)
+            enc_key1 = s.recv(1024)
+            enc_key2 = s.recv(1024)
+            enc_key3 = s.recv(1024)
+            key_data = rsa.decrypt(enc_key1, RSA_KEYS[1]) + \
+                    rsa.decrypt(enc_key2, RSA_KEYS[1]) + \
+                    rsa.decrypt(enc_key3, RSA_KEYS[1])
+            SYMMETRIC_KEY = pickle.loads(key_data)
+            confirmation_enc = rsa.encrypt(pickle.dumps(new_id), SERVER_PUBLIC_KEY)
+            s.sendall(confirmation_enc)
+            time.sleep(0.2)
+            s.close()
+            MY_ID = new_id
+            return True
+    except:
         return False
-    # analyze the packets
-    # the first packet is the ID
-    id_pkt = sniffer.results[0]
-    # id_pkt.display()
-    if id_pkt.haslayer(Raw):
-        global MY_ID
-        enc_data = id_pkt.getlayer(Raw).load
-        raw_data = rsa.decrypt(id_pkt.getlayer(Raw).load, RSA_KEYS[1])
-        data = pickle.loads(raw_data)
-        MY_ID = data
-    # the next 3 packets are the symmetric key
-    key_pkt1 = sniffer.results[1]
-    key_pkt2 = sniffer.results[2]
-    key_pkt3 = sniffer.results[3]
-    if key_pkt1.haslayer(Raw) and key_pkt2.haslayer(Raw) and key_pkt3.haslayer(Raw):
-        # decrypts all packets and connects them
-        key_data = rsa.decrypt(key_pkt1.getlayer(Raw).load, RSA_KEYS[1]) + \
-                   rsa.decrypt(key_pkt2.getlayer(Raw).load, RSA_KEYS[1]) + \
-                   rsa.decrypt(key_pkt3.getlayer(Raw).load, RSA_KEYS[1])
-        data = pickle.loads(key_data)
-        # saves the symmetric key in the global variable
-        SYMMETRIC_KEY = data
-        print('Received a symmetric key = ' + str(SYMMETRIC_KEY))
-        fernet = Fernet(SYMMETRIC_KEY)
-        confirm_key = IP(dst=ServerIP) / TCP(sport=REGISTER_PORT, dport=REGISTER_PORT) / \
-                      Raw(fernet.encrypt(pickle.dumps(MY_ID)))
-        print('waiting for server to listen')
-        time.sleep(1)
-        print("Sending confirmation")
-        send(confirm_key, iface=REAL_INTERFACE)
-        return True
-    return False
 
 
 def get_raw_RSAencrypted_of(data, PubKey):
@@ -200,7 +184,23 @@ def get_public_key(ServerIP):
     """
     Sends a request to the server to get its public key and saves it in the global variable SERVER_PUBLIC_KEY
     """
-    global SERVER_PORT, REAL_INTERFACE, SERVER_PUBLIC_KEY
+    global INFO_PORT, REAL_INTERFACE, SERVER_PUBLIC_KEY
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.connect((ServerIP, INFO_PORT))
+            print("requesting public key")
+            s.sendall(b'Get Public Key')
+            data = s.recv(1024)
+            if len(data) > 0:
+                SERVER_PUBLIC_KEY = pickle.loads(data)
+                s.close()
+                print("received public key")
+                return True
+            s.close()
+            return False
+    except:
+        s.close()
+        return False
     my_ip = get_if_addr(conf.iface)
     sniffer = AsyncSniffer(iface=REAL_INTERFACE, lfilter=get_server_response_lambda(INFO_PORT), count=1, timeout=10)
     sniffer.start()
@@ -232,7 +232,7 @@ def pack_to_server(pkt):
     enc_data = fernet.encrypt(raw_data)
 
     # creating the packet and sending it
-    return IP(dst=SERVER_ADDRESS) / TCP(dport=SERVICE_PORT, sport=SERVICE_PORT) / Raw(enc_data)
+    return enc_data
 
 
 def unpack_from_server(pkt):
@@ -244,6 +244,7 @@ def unpack_from_server(pkt):
 
 
 def TryHTTP():
+    global USED_INTERFACE
     print("Trying HTTP")
     dst_ip = "google.com"
 
@@ -259,7 +260,7 @@ def TryHTTP():
     # Send the packet and receive the response
 
     # Create an IP packet
-    ip = IP(dst="info.cern.ch", id=1234)
+    ip = IP(src=get_if_addr(USED_INTERFACE), dst="info.cern.ch", id=1234)
 
     # Create a TCP packet
     # Create a SYN packet
@@ -351,7 +352,8 @@ def main():
     parser.add_argument('-t','--tester', type=str, help='the name of the tester to use')
     parser.add_argument("-pi", "--print_interfaces", help="prints all interfaces", action="store_true")
     args = parser.parse_args()
-
+    #args.server = '127.0.0.1'
+    #args.tester = 'saar'
     #if -pi was given, print all interfaces and exit
     if args.print_interfaces:
         print(conf.route)
