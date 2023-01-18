@@ -13,7 +13,7 @@ SERVER_ADDRESS = '192.168.113.56'
 INFO_PORT = 6490
 REGISTER_PORT = 6491
 SERVICE_PORT = 6492
-#REAL_INTERFACE = conf.iface
+# REAL_INTERFACE = conf.iface
 REAL_INTERFACE = ''
 REAL_INTERFACE_IP = ''
 USED_INTERFACE = ''
@@ -22,8 +22,9 @@ RSA_KEYS = ()
 SERVER_PUBLIC_KEY = ''
 SYMMETRIC_KEY = ''
 DISCONNECTED_WAIT_TIME = 5
-tester_settings = {'saar' : {'iface' : "MediaTek Wi-Fi 6 MT7921 Wireless LAN Card", 'adapter' : "CoolVPN"},
-                   'shoham' : {'iface' : "Intel(R) Dual Band Wireless-AC 8260", 'adapter' : "CoolVPN"}}
+tester_settings = {'saar': {'iface': "MediaTek Wi-Fi 6 MT7921 Wireless LAN Card", 'adapter': "CoolVPN"},
+                   'shoham': {'iface': "Intel(R) Dual Band Wireless-AC 8260", 'adapter': "CoolVPN"}}
+
 
 def StartConnection(ServerIP, adapter_interface, real_interface):
     """
@@ -38,11 +39,10 @@ def StartConnection(ServerIP, adapter_interface, real_interface):
     print(REAL_INTERFACE_IP)
     confirm_keys()
     verify_adapter()
-    #listen_from_adapter(USED_INTERFACE)
+    # listen_from_adapter(USED_INTERFACE)
     print(REAL_INTERFACE)
     id_received = False
 
-    
     while not id_received:
         try:
             id_received = get_id_from_server(ServerIP)
@@ -109,16 +109,19 @@ def ProcessPackets(pkt):
     pkt.display()
     send(packet, iface=REAL_INTERFACE)
 
+
 def respond_to_arp(pkt):
     """
     responds to arp requests
     """
     global REAL_INTERFACE_IP, USED_INTERFACE
-    if ARP in pkt and pkt[ARP].op == 1: # If the packet is an ARP request
-        target_ip = pkt[ARP].pdst # Get the target IP address from the packet
-        src_mac = get_if_hwaddr(USED_INTERFACE) # Get the caller's MAC address
-        arp_reply = ARP(hwsrc=src_mac, psrc=target_ip, hwdst=pkt[ARP].hwsrc, pdst=pkt[ARP].psrc, op=2) # Create the ARP reply packet
+    if ARP in pkt and pkt[ARP].op == 1:  # If the packet is an ARP request
+        target_ip = pkt[ARP].pdst  # Get the target IP address from the packet
+        src_mac = get_if_hwaddr(USED_INTERFACE)  # Get the caller's MAC address
+        arp_reply = ARP(hwsrc=src_mac, psrc=target_ip, hwdst=pkt[ARP].hwsrc, pdst=pkt[ARP].psrc,
+                        op=2)  # Create the ARP reply packet
         send(arp_reply, iface=USED_INTERFACE)
+
 
 def get_id_from_server(ServerIP):
     """
@@ -208,7 +211,7 @@ def get_public_key(ServerIP):
     # packet.display()
     print("sending get public key packet")
     send(packet, iface=REAL_INTERFACE)
-    #send(packet, iface=REAL_INTERFACE)
+    # send(packet, iface=REAL_INTERFACE)
     sniffer.join()
     if len(sniffer.results) == 0:
         print("no response")
@@ -330,6 +333,7 @@ def verify_adapter():
     # Check whether the adapter exists
     subprocess.run(['tapctl', 'create', '--name', 'CoolVPN'])
 
+
 def sendHTTP(to_ip):
     ip = IP(dst=to_ip, id=1234)
     tcp = TCP(dport=80, flags='S')
@@ -337,25 +341,26 @@ def sendHTTP(to_ip):
     http_req = ip / atcp / "GET / HTTP/1.1\r\n\r\n"
     send(http_req, iface=REAL_INTERFACE)
 
+
 # Main
-#StartConnection(SERVER_ADDRESS, 'CoolVPN', "Intel(R) Dual Band Wireless-AC 8260")
+# StartConnection(SERVER_ADDRESS, 'CoolVPN', "Intel(R) Dual Band Wireless-AC 8260")
 
-def main(): 
+def main():
     # get arguments
-    #import argparse
-    
-    parser = argparse.ArgumentParser(description='Client for the VPN')
-    parser.add_argument('-s','--server', type=str, help='the ip of the server')
-    parser.add_argument('-i','--interface', type=str, help='the name of the interface to use')
-    parser.add_argument('-a','--adapter', type=str, help='the name of the adapter to use')
-    parser.add_argument('-t','--tester', type=str, help='the name of the tester to use')
-    args = parser.parse_args()
-    #check if arguments are valid
-    if args.tester is not None:
-            args.interface = tester_settings[args.tester]['iface']
-            args.adapter = tester_settings[args.tester]['adapter']
+    # import argparse
 
-    if args.server is None: 
+    parser = argparse.ArgumentParser(description='Client for the VPN')
+    parser.add_argument('-s', '--server', type=str, help='the ip of the server')
+    parser.add_argument('-i', '--interface', type=str, help='the name of the interface to use')
+    parser.add_argument('-a', '--adapter', type=str, help='the name of the adapter to use')
+    parser.add_argument('-t', '--tester', type=str, help='the name of the tester to use')
+    args = parser.parse_args()
+    # check if arguments are valid
+    if args.tester is not None:
+        args.interface = tester_settings[args.tester]['iface']
+        args.adapter = tester_settings[args.tester]['adapter']
+
+    if args.server is None:
         print("error, insufficient arguments (server)")
         return
 
@@ -364,12 +369,11 @@ def main():
     if args.adapter is None:
         args.adapter = "CoolVPN"
 
-
-
     try:
         StartConnection(args.server, args.adapter, args.interface)
     except:
         print("error, Exiting...")
+
 
 if __name__ == "__main__":
     main()
